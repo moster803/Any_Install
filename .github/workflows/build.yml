@@ -46,6 +46,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    # One build job at a time, so two runs can never publish the same
+    # version: the second one sees the first one's tag and stops.
+    concurrency:
+      group: build-and-release
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
         with:
@@ -67,23 +72,32 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
         run: |
           version=""
-          if [[ "$REF" == refs/tags/v* ]]; then
-            version="$REF_NAME"
-          elif [[ -n "$INPUT_VERSION" ]]; then
+          if [[ -n "$INPUT_VERSION" ]]; then
             version="$INPUT_VERSION"
+          elif [[ "$REF" == refs/tags/v* ]]; then
+            version="$REF_NAME"
           elif [[ "$EVENT" == push && "$REF" == refs/heads/main && -f VERSION ]]; then
-            version="$(tr -d '[:space:]' < VERSION)"
+            version="$(<VERSION)"
+            version="${version#"${version%%[![:space:]]*}"}"   # trim leading whitespace
+            version="${version%"${version##*[![:space:]]}"}"   # trim trailing whitespace
           fi
           if [[ -n "$version" ]]; then
             [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Version must look like v1.2.3, got: $version"; exit 1; }
             # A version is published once, so its files always match its tag.
-            if [[ "$REF" != refs/tags/* ]] && git ls-remote --exit-code --tags origin "refs/tags/$version" >/dev/null; then
-              if [[ -n "$INPUT_VERSION" ]]; then
-                echo "::error::$version already exists, choose a new version"
+            if [[ -n "$INPUT_VERSION" || "$REF" != refs/tags/* ]]; then
+              rc=0
+              git ls-remote --exit-code --tags origin "refs/tags/$version" >/dev/null || rc=$?
+              if [[ $rc -eq 0 ]]; then
+                if [[ -n "$INPUT_VERSION" ]]; then
+                  echo "::error::$version already exists, choose a new version"
+                  exit 1
+                fi
+                echo "$version is already released, nothing to publish"
+                version=""
+              elif [[ $rc -ne 2 ]]; then
+                echo "::error::Could not check whether $version exists (git ls-remote exit $rc)"
                 exit 1
               fi
-              echo "$version is already released, nothing to publish"
-              version=""
             fi
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
