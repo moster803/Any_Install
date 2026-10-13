@@ -1,5 +1,27 @@
 # Any Install – Bauplan (Entwurf 1)
 
+## Stand nach der Abstimmung (13.10.2026)
+
+Antworten auf die offenen Fragen und was daraus folgt:
+
+| Frage | Antwort | Entscheidung |
+|---|---|---|
+| System des Kumpels | Windows 11 auf dem **ASUS ROG Ally**, getestet wird unter Linux | Touch-taugliche Oberfläche (große Knöpfe, „Datei auswählen“ statt nur Drag & Drop), Fenster passt sich dem 7-Zoll-Bildschirm an. Demo-Modus zum Testen unter Linux ohne die Spiele. |
+| Sprache | „Was am besten geht“ | **Go**, aber die Oberfläche läuft als App-Fenster von Microsoft Edge statt mit Fyne. Edge ist auf jedem Windows 11 dabei und kann Touch-Scrollen auf dem Ally von Haus aus. Fyne hat damit unter Windows Probleme. Weitere Vorteile: Die Oberfläche sieht exakt wie die Entwürfe aus, lässt sich automatisch testen, und die `.exe` ist nur ~9 MB groß. |
+| Spiele | 7 Days to Die, **Elden Ring**, **Minecraft Java** | Elden Ring: Seamless Co-op samt Passwort, Elden Mod Loader, DLL-Mods. Minecraft: Mods, Ressourcenpakete, Shader, Versionsprüfung und Fabric-Einrichtung. Minecraft ist kein Steam-Spiel; es wird über den `.minecraft`-Ordner gefunden. |
+| Eigener Server | Nein, Multiplayer-Welt im Spiel | Kein Server-Ziel. Stattdessen Tipps zum Zusammenspielen nach der Installation (Seamless Co-op, e4mc für Minecraft). |
+| Name, Sprache | Umbenennen erlaubt, Deutsch + Englisch | Name bleibt **Any Install** (passt zum Repo). Oberfläche auf Deutsch und Englisch, umschaltbar oben rechts. |
+
+Wichtige Erkenntnis bei der Umsetzung: 7 Days to Die bevorzugt seit Version 1.0 den
+Mods-Ordner unter `%APPDATA%\7DaysToDie\Mods`. Neue Mods kommen dorthin, Mods im alten
+Ordner im Spielverzeichnis werden weiter erkannt.
+
+Umgesetzt sind Etappe 1 und der größte Teil von Etappe 2 (Meine Mods mit Ein/Aus,
+Entfernen, Rückgängig, Reparieren; Drag & Drop; „Spiel läuft“-Prüfung; weitere Suchordner).
+Wie es jetzt aussieht, zeigt die [README](../README.md).
+
+---
+
 Ein kleines Programm, das Mods im Download-Ordner findet und sie richtig in den
 Mods-Ordner des Spiels entpackt. Eine einzige Datei, kein Setup, läuft unter
 Windows und Linux. Erstes Ziel: **7 Days to Die** über Steam.
