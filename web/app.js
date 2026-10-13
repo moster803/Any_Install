@@ -25,6 +25,8 @@
     scanning: false,
     sel: new Set(),
     unchecked: new Set(),
+    open: new Set(),   // packs whose single mods are shown
+    busyHint: "",
     showOthers: false,
     installed: null,
     result: null,
@@ -252,11 +254,10 @@
     </section>`;
   }
 
+  // Counts downloads, not the mods inside them: an overhaul pack is one.
   function newCount() {
     if (!S.scan) return "";
-    let n = 0;
-    for (const it of S.scan.items) for (const m of it.mods) if (m.status === "new" || m.status === "update") n++;
-    return n;
+    return S.scan.items.filter((it) => it.mods.some((m) => m.status === "new" || m.status === "update")).length;
   }
   function mineCount() {
     if (!S.installed) return "";
@@ -317,24 +318,58 @@
     return out;
   }
 
+  function modRow(it, m, sub) {
+    const k = selKey(it, m);
+    const on = S.sel.has(k);
+    const meta = (sub ? [kindMeta(m)] : [it.imported ? t("imported") : it.file, fmtSize(it.size), fmtDate(it.modified), kindMeta(m)])
+      .filter(Boolean).join(" · ");
+    const check = m.selectable ? `<span class="check ${on ? "" : "unchecked"}">${on ? icon("check") : ""}</span>` : `<span class="check disabled"></span>`;
+    const attrs = m.selectable
+      ? `class="row selectable${sub ? " sub" : ""}" data-action="toggle-sel" data-sel="${esc(k)}" role="checkbox" aria-checked="${on}" tabindex="0"`
+      : `class="row off${sub ? " sub" : ""}"`;
+    return `<div ${attrs}>${check}<span class="ftype">${sub ? "" : esc(it.kind === "dir" ? t("folder") : it.kind)}</span>
+      <span class="rtext"><span class="rname">${esc(m.name)}${m.version && m.status !== "update" ? ` <span class="muted" style="font-weight:400;color:var(--muted)">${esc(m.version)}</span>` : ""}</span>
+      ${meta ? `<span class="rmeta">${esc(meta)}</span>` : ""}${notesHTML(m.notes)}</span>
+      <span class="rside">${statusPill(m)}</span></div>`;
+  }
+
+  const packName = (it) => it.kind === "dir" ? it.file : it.file.replace(/\.(zip|7z|rar|jar|mrpack)$/i, "");
+
+  // A download with several mods (an overhaul pack) is one row with one
+  // checkbox for all of them; it can be opened to pick single mods.
+  function packRow(it) {
+    const sel = it.mods.filter((m) => m.selectable);
+    const nOn = sel.filter((m) => S.sel.has(selKey(it, m))).length;
+    const state = !sel.length ? "disabled" : !nOn ? "unchecked" : nOn === sel.length ? "on" : "partial";
+    const check = state === "disabled" ? `<span class="check disabled"></span>`
+      : `<span class="check ${state === "on" ? "" : state}">${state === "on" ? icon("check") : state === "partial" ? icon("minus") : ""}</span>`;
+    const meta = [it.imported ? t("imported") : it.file, fmtSize(it.size), fmtDate(it.modified), t("pack_contains", { n: it.mods.length })]
+      .filter(Boolean).join(" · ");
+    // Each hint once for the whole pack.
+    const seen = new Set();
+    const notes = it.mods.flatMap((m) => m.notes || []).filter((n) => {
+      const key = n.level + noteText(n);
+      return seen.has(key) ? false : seen.add(key);
+    });
+    const statuses = it.mods.map((m) => m.status);
+    const status = ["update", "new", "older", "installed", "unsupported"].find((s) => statuses.includes(s)) || "new";
+    const open = S.open.has(it.path);
+    const attrs = state === "disabled" ? `class="row off"`
+      : `class="row selectable" data-action="toggle-pack" data-path="${esc(it.path)}" role="checkbox" aria-checked="${state === "on" ? "true" : state === "partial" ? "mixed" : "false"}" tabindex="0"`;
+    let html = `<div ${attrs}>${check}<span class="ftype">${esc(it.kind === "dir" ? t("folder") : it.kind)}</span>
+      <span class="rtext"><span class="rname">${esc(packName(it))}</span><span class="rmeta">${esc(meta)}</span>${notesHTML(notes)}
+        <span><button class="link" data-action="toggle-open" data-path="${esc(it.path)}">${esc(open ? t("hide_mods") : t("show_mods", { n: it.mods.length }))}</button></span></span>
+      <span class="rside"><span class="pill ${esc(status)}">${esc(t("st_" + status))}</span></span></div>`;
+    if (open) html += `<div class="sublist">${it.mods.map((m) => modRow(it, m, true)).join("")}</div>`;
+    return html;
+  }
+
   function newList() {
     if (!S.scan) return `<div class="empty"><div class="spinner"></div><span>${esc(t("scanning"))}</span></div>`;
     const g = game();
     let rows = "";
     for (const it of S.scan.items) {
-      for (const m of it.mods) {
-        const k = selKey(it, m);
-        const on = S.sel.has(k);
-        const meta = [it.imported ? t("imported") : it.file, fmtSize(it.size), fmtDate(it.modified), kindMeta(m)].filter(Boolean).join(" · ");
-        const check = m.selectable ? `<span class="check ${on ? "" : "unchecked"}">${on ? icon("check") : ""}</span>` : `<span class="check disabled"></span>`;
-        const attrs = m.selectable
-          ? `class="row selectable" data-action="toggle-sel" data-sel="${esc(k)}" role="checkbox" aria-checked="${on}" tabindex="0"`
-          : `class="row off"`;
-        rows += `<div ${attrs}>${check}<span class="ftype">${esc(it.kind === "dir" ? t("folder") : it.kind)}</span>
-          <span class="rtext"><span class="rname">${esc(m.name)}${m.version && m.status !== "update" ? ` <span class="muted" style="font-weight:400;color:var(--muted)">${esc(m.version)}</span>` : ""}</span>
-          <span class="rmeta">${esc(meta)}</span>${notesHTML(m.notes)}</span>
-          <span class="rside">${statusPill(m)}</span></div>`;
-      }
+      rows += it.mods.length > 1 ? packRow(it) : modRow(it, it.mods[0], false);
     }
     let others = "";
     const n = S.scan.others.length;
@@ -363,6 +398,13 @@
     return out;
   }
 
+  // The downloads with something selected; a pack counts once.
+  function selectedDownloads() {
+    return new Set(selectedItems().map((x) => x.path));
+  }
+
+  // The button counts mods, so a pack with 17 mods counts 17; the list
+  // shows one row per download and says how many mods a pack contains.
   function footNew() {
     const n = selectedItems().length;
     const label = n === 0 ? t("install_0") : n === 1 ? t("install_1") : t("install_n", { n });
@@ -450,8 +492,19 @@
 
   function viewDone() {
     const r = S.result;
+    // One line per download, so an overhaul pack is one line.
+    const groups = [];
+    for (const x of r.installed) {
+      const g = groups.find((g) => x.source && g.source === x.source);
+      if (g) g.items.push(x); else groups.push({ source: x.source, file: x.file, items: [x] });
+    }
     const n = r.installed.length;
-    const list = r.installed.map((x) => {
+    const list = groups.map((g) => {
+      if (g.items.length > 1) {
+        const name = g.file.replace(/\.(zip|7z|rar|jar|mrpack)$/i, "");
+        return `<li>${icon("check")}<b>${esc(name)}</b><span class="muted">${esc(t("done_pack", { n: g.items.length }))}</span></li>`;
+      }
+      const x = g.items[0];
       const what = x.status === "update" || x.status === "older"
         ? (x.version ? t("done_update_v", { v: x.version }) : t("done_update")) : t("done_new");
       return `<li>${icon("check")}<b>${esc(x.name)}</b><span class="muted">${esc(what)}</span></li>`;
@@ -477,7 +530,7 @@
   function renderOverlay() {
     let html = "";
     if (S.busy) {
-      html += `<div class="scrim" aria-live="polite"><div class="busy"><div class="spinner"></div><span>${esc(S.busy)}</span></div></div>`;
+      html += `<div class="scrim" aria-live="polite"><div class="busy"><div class="spinner"></div><span>${esc(S.busy)}</span>${S.busyHint ? `<small>${esc(S.busyHint)}</small>` : ""}</div></div>`;
     } else if (S.dialog) {
       const d = S.dialog;
       html += `<div class="scrim" role="dialog" aria-modal="true"><div class="dialog">
@@ -527,10 +580,12 @@
     try {
       await fn();
     } catch (e) {
+      S.busyHint = "";
       showError(e, retry);
       return false;
     }
     S.busy = "";
+    S.busyHint = "";
     render();
     return true;
   }
@@ -538,7 +593,11 @@
   async function install() {
     const items = selectedItems();
     if (!items.length) return;
+    const paths = selectedDownloads();
     const busy = items.length === 1 ? t("installing_1") : t("installing_n", { n: items.length });
+    // Big packs take a while to unpack; say so, so nobody closes the window.
+    const total = S.scan.items.filter((it) => paths.has(it.path)).reduce((sum, it) => sum + (it.size || 0), 0);
+    S.busyHint = total > 500 * 1024 * 1024 ? t("big_download", { size: fmtSize(total) }) : "";
     await run(busy, async () => {
       const res = await api("POST", "/api/install", { game: S.game, items });
       S.result = res;
@@ -624,6 +683,22 @@
     "toggle-sel"(el) {
       const k = el.dataset.sel;
       if (S.sel.has(k)) { S.sel.delete(k); S.unchecked.add(k); } else { S.sel.add(k); S.unchecked.delete(k); }
+      render();
+    },
+    "toggle-pack"(el) {
+      const it = S.scan?.items.find((i) => i.path === el.dataset.path);
+      if (!it) return;
+      const mods = it.mods.filter((m) => m.selectable);
+      const all = mods.every((m) => S.sel.has(selKey(it, m)));
+      for (const m of mods) {
+        const k = selKey(it, m);
+        if (all) { S.sel.delete(k); S.unchecked.add(k); } else { S.sel.add(k); S.unchecked.delete(k); }
+      }
+      render();
+    },
+    "toggle-open"(el) {
+      const p = el.dataset.path;
+      if (S.open.has(p)) S.open.delete(p); else S.open.add(p);
       render();
     },
     "show-others"() { S.showOthers = !S.showOthers; render(); },
