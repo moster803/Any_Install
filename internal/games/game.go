@@ -186,13 +186,19 @@ func under(name, prefix string) bool {
 	return prefix == "" || name == prefix || strings.HasPrefix(name, prefix+"/")
 }
 
-// fileBase returns a download's file name without extension.
+var copySuffix = regexp.MustCompile(`\s*\(\d+\)$`)
+
+// fileBase returns a download's file name without extension and without
+// the " (1)" browsers add when the same file is downloaded again.
 func fileBase(p string) string {
 	b := filepath.Base(p)
-	if st, err := os.Stat(p); err == nil && st.IsDir() {
-		return b
+	if st, err := os.Stat(p); err != nil || !st.IsDir() {
+		b = strings.TrimSuffix(b, filepath.Ext(b))
 	}
-	return strings.TrimSuffix(b, filepath.Ext(b))
+	if t := copySuffix.ReplaceAllString(b, ""); t != "" {
+		b = t
+	}
+	return b
 }
 
 var versionInName = regexp.MustCompile(`(?i)(?:^|[\s_\-.(\[]v?|v)(\d+(?:\.\d+){1,3}[a-z]?)`)

@@ -152,7 +152,7 @@ func TestEldenRingAnalyze(t *testing.T) {
 	if len(f) != 1 || f[0].Kind != "dllmod" || f[0].Key != "Roll/mods" || f[0].Name != "Roll" {
 		t.Errorf("dll mod: %+v", f)
 	}
-	f = analyze(t, g, "reforged.zip", map[string]string{"regulation.bin": "", "parts/a.dcx": ""})
+	f = analyze(t, g, "Elden Ring Reforged.zip", map[string]string{"regulation.bin": "", "parts/a.dcx": ""})
 	if len(f) != 1 || f[0].Unsupported != "needs_modengine" {
 		t.Errorf("me2: %+v", f)
 	}
@@ -263,5 +263,49 @@ func TestSetupFabric(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(requests, ","), "/v2/versions/game") {
 		t.Error("game versions not queried")
+	}
+}
+
+func TestEldenRingIgnoresOtherDLLDownloads(t *testing.T) {
+	g := &EldenRing{}
+	// SMAPI, the Stardew Valley mod loader installer: many DLLs plus scripts.
+	smapi := map[string]string{
+		"SMAPI 4.5.2 installer/install on Windows.bat":                     "",
+		"SMAPI 4.5.2 installer/install on Linux.sh":                        "",
+		"SMAPI 4.5.2 installer/internal/windows/SMAPI.Installer.dll":       "",
+		"SMAPI 4.5.2 installer/internal/windows/SMAPI.Toolkit.dll":         "",
+		"SMAPI 4.5.2 installer/internal/windows/SMAPI.Installer.deps.json": "",
+	}
+	if f := analyze(t, g, "SMAPI-4.5.2-installer.zip", smapi); len(f) != 0 {
+		t.Errorf("SMAPI detected as Elden Ring mod: %+v", f)
+	}
+	// A lone DLL without any sign that it belongs to Elden Ring.
+	if f := analyze(t, g, "SomeTool.zip", map[string]string{"SomeTool.dll": "MZ", "readme.txt": ""}); len(f) != 0 {
+		t.Errorf("lone DLL detected: %+v", f)
+	}
+	// Folders named like game folders are not enough for Mod Engine 2.
+	if f := analyze(t, g, "website.zip", map[string]string{"font/a.ttf": "", "script/app.js": "", "asset/logo.png": ""}); len(f) != 0 {
+		t.Errorf("website detected as Mod Engine 2 mod: %+v", f)
+	}
+	// Real signs still work: DLL with its config, FromSoftware file types.
+	if f := analyze(t, g, "FasterRoll.zip", map[string]string{"FasterRoll.dll": "MZ", "FasterRoll.ini": ""}); len(f) != 1 || f[0].Kind != "dllmod" {
+		t.Errorf("DLL with config: %+v", f)
+	}
+	if f := analyze(t, g, "EldenRing_NoHUD.zip", map[string]string{"NoHUD.dll": "MZ"}); len(f) != 1 || f[0].Kind != "dllmod" {
+		t.Errorf("DLL in download named after the game: %+v", f)
+	}
+	// A DLL in a "mods" folder alone is common in other games too.
+	if f := analyze(t, g, "HollowMod.zip", map[string]string{"Mods/HollowMod.dll": "MZ"}); len(f) != 0 {
+		t.Errorf("other game's mods folder detected: %+v", f)
+	}
+	// FromSoftware files only count when the download is about Elden Ring.
+	if f := analyze(t, g, "Elden Ring Armor.zip", map[string]string{"parts/am_m_1000.partsbnd.dcx": ""}); len(f) != 1 || f[0].Kind != "me2" {
+		t.Errorf("Mod Engine 2 files: %+v", f)
+	}
+	if f := analyze(t, g, "DS3 Armor.zip", map[string]string{"parts/am_m_1000.partsbnd.dcx": ""}); len(f) != 0 {
+		t.Errorf("Dark Souls mod detected as Elden Ring: %+v", f)
+	}
+	if f := analyze(t, g, "Reforged (1).zip", map[string]string{"config_eldenring.toml": "", "regulation.bin": ""}); len(f) != 1 || f[0].ModID != "reforged" {
+		t.Errorf("duplicate download suffix kept in id: %+v", f)
 	}
 }
