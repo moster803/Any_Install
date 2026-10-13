@@ -265,3 +265,36 @@ func TestSetupFabric(t *testing.T) {
 		t.Error("game versions not queried")
 	}
 }
+
+func TestEldenRingIgnoresOtherDLLDownloads(t *testing.T) {
+	g := &EldenRing{}
+	// SMAPI, the Stardew Valley mod loader installer: many DLLs plus scripts.
+	smapi := map[string]string{
+		"SMAPI 4.5.2 installer/install on Windows.bat":                     "",
+		"SMAPI 4.5.2 installer/install on Linux.sh":                        "",
+		"SMAPI 4.5.2 installer/internal/windows/SMAPI.Installer.dll":       "",
+		"SMAPI 4.5.2 installer/internal/windows/SMAPI.Toolkit.dll":         "",
+		"SMAPI 4.5.2 installer/internal/windows/SMAPI.Installer.deps.json": "",
+	}
+	if f := analyze(t, g, "SMAPI-4.5.2-installer.zip", smapi); len(f) != 0 {
+		t.Errorf("SMAPI detected as Elden Ring mod: %+v", f)
+	}
+	// A lone DLL without any sign that it belongs to Elden Ring.
+	if f := analyze(t, g, "SomeTool.zip", map[string]string{"SomeTool.dll": "MZ", "readme.txt": ""}); len(f) != 0 {
+		t.Errorf("lone DLL detected: %+v", f)
+	}
+	// Folders named like game folders are not enough for Mod Engine 2.
+	if f := analyze(t, g, "website.zip", map[string]string{"font/a.ttf": "", "script/app.js": "", "asset/logo.png": ""}); len(f) != 0 {
+		t.Errorf("website detected as Mod Engine 2 mod: %+v", f)
+	}
+	// Real signs still work: DLL with its config, FromSoftware file types.
+	if f := analyze(t, g, "FasterRoll.zip", map[string]string{"FasterRoll.dll": "MZ", "FasterRoll.ini": ""}); len(f) != 1 || f[0].Kind != "dllmod" {
+		t.Errorf("DLL with config: %+v", f)
+	}
+	if f := analyze(t, g, "EldenRing_NoHUD.zip", map[string]string{"NoHUD.dll": "MZ"}); len(f) != 1 || f[0].Kind != "dllmod" {
+		t.Errorf("DLL in download named after the game: %+v", f)
+	}
+	if f := analyze(t, g, "armor.zip", map[string]string{"parts/am_m_1000.partsbnd.dcx": ""}); len(f) != 1 || f[0].Kind != "me2" {
+		t.Errorf("Mod Engine 2 files: %+v", f)
+	}
+}

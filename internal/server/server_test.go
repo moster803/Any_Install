@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/moster803/Any_Install/internal/demo"
 )
@@ -249,5 +250,30 @@ func TestGamePathMustContainTheGame(t *testing.T) {
 	game := filepath.Join(env["ANYINSTALL_STEAM"], "steamapps", "common", "ELDEN RING", "Game")
 	if code := call(t, s, "POST", base+"/api/game-path", map[string]string{"game": "eldenring", "path": game}, nil); code != 200 {
 		t.Errorf("Game folder refused: %d", code)
+	}
+}
+
+func TestScanShowsEachModOnce(t *testing.T) {
+	s, base, env := testServer(t)
+	dl := env["ANYINSTALL_DOWNLOADS"]
+	// The zip unpacked next to itself, and the same zip downloaded twice.
+	mi := `<xml><Name value="NeuesHUD"/><DisplayName value="Neues HUD"/><Version value="1.3"/></xml>`
+	os.MkdirAll(filepath.Join(dl, "NeuesHUD_v1.3", "NeuesHUD"), 0o755)
+	os.WriteFile(filepath.Join(dl, "NeuesHUD_v1.3", "NeuesHUD", "ModInfo.xml"), []byte(mi), 0o644)
+	demo.WriteZip(filepath.Join(dl, "NeuesHUD_v1.3 (1).zip"), map[string]string{"NeuesHUD/ModInfo.xml": mi})
+	os.Chtimes(filepath.Join(dl, "NeuesHUD_v1.3 (1).zip"), time.Now().Add(-48*time.Hour), time.Now().Add(-48*time.Hour))
+
+	var scan scanResp
+	call(t, s, "GET", base+"/api/scan?game=7dtd", nil, &scan)
+	var files []string
+	for _, it := range scan.Items {
+		for _, m := range it.Mods {
+			if m.Name == "Neues HUD" {
+				files = append(files, it.File)
+			}
+		}
+	}
+	if len(files) != 1 || files[0] != "NeuesHUD_v1.3.zip" {
+		t.Errorf("Neues HUD listed from %v, want only the newest zip", files)
 	}
 }

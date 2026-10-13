@@ -205,6 +205,7 @@ func samePath(a, b string) bool {
 type modView struct {
 	Key              string       `json:"key"`
 	Name             string       `json:"name"`
+	ModID            string       `json:"modId"`
 	Version          string       `json:"version,omitempty"`
 	Kind             string       `json:"kind"`
 	Status           string       `json:"status"`
@@ -359,7 +360,7 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 				blocked = blocked || n.Level == "error"
 			}
 			v.Mods = append(v.Mods, modView{
-				Key: f.Key, Name: f.Name, Version: f.Version, Kind: f.Kind, Status: status,
+				Key: f.Key, Name: f.Name, ModID: f.ModID, Version: f.Version, Kind: f.Kind, Status: status,
 				InstalledVersion: iv, Notes: notes, Selectable: sel,
 				Checked: (status == games.StatusNew || status == games.StatusUpdate) && !blocked,
 				Loader:  f.Loader, MCVersion: f.MCVersion, MCLabel: games.DescribeMC(f.MCVersion), HasCode: f.HasCode,
@@ -372,8 +373,51 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	sortItems(items)
+	items = dedupe(items)
 	sortItems(others)
 	writeJSON(w, map[string]any{"items": items, "others": others, "folders": s.folders()[:len(s.folders())-1]})
+}
+
+// dedupe shows every mod once, even if the download folder holds it more
+// than once: an archive and the folder unpacked from it, or "Mod.zip" and
+// "Mod (1).zip". The downloaded file wins over an unpacked folder, then a
+// dropped-in file, then the newest.
+func dedupe(items []itemView) []itemView {
+	type ref struct{ item, mod int }
+	key := func(m modView) string {
+		return m.Kind + "|" + strings.ToLower(m.ModID) + "|" + m.Version + "|" + m.Loader
+	}
+	better := func(a, b itemView) bool {
+		if (a.Kind == "dir") != (b.Kind == "dir") {
+			return b.Kind == "dir"
+		}
+		if a.Imported != b.Imported {
+			return a.Imported
+		}
+		return a.Modified.After(b.Modified)
+	}
+	best := map[string]ref{}
+	for i, it := range items {
+		for j, m := range it.Mods {
+			if r, ok := best[key(m)]; !ok || better(it, items[r.item]) {
+				best[key(m)] = ref{i, j}
+			}
+		}
+	}
+	var out []itemView
+	for i, it := range items {
+		var keep []modView
+		for j, m := range it.Mods {
+			if best[key(m)] == (ref{i, j}) {
+				keep = append(keep, m)
+			}
+		}
+		if len(keep) > 0 {
+			it.Mods = keep
+			out = append(out, it)
+		}
+	}
+	return out
 }
 
 func kindOf(src source) string {

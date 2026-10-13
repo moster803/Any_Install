@@ -57,11 +57,18 @@ func (g *EldenRing) Locate(env *Env) Location {
 	}
 }
 
-// Folders that only Mod Engine 2 can load.
-var me2Dirs = map[string]bool{
-	"parts": true, "chr": true, "menu": true, "msg": true, "map": true, "param": true,
-	"sfx": true, "sd": true, "event": true, "action": true, "script": true, "asset": true,
-	"font": true, "mtd": true, "obj": true, "material": true, "shader": true,
+// File types only FromSoftware games use. Mods for Mod Engine 2 consist of
+// them (for example "parts/am_m_1000.partsbnd.dcx").
+var fromSoftExts = map[string]bool{
+	".dcx": true, ".bnd": true, ".partsbnd": true, ".chrbnd": true, ".anibnd": true,
+	".objbnd": true, ".tpf": true, ".fmg": true, ".emevd": true, ".msb": true,
+	".flver": true, ".gparam": true, ".fxr": true, ".hks": true,
+}
+
+// Files that make a download a program or installer rather than a DLL mod.
+var programExts = map[string]bool{
+	".exe": true, ".bat": true, ".cmd": true, ".sh": true, ".msi": true,
+	".command": true, ".ps1": true,
 }
 
 func (g *EldenRing) Analyze(src archive.Source, entries []archive.Entry) []Found {
@@ -99,42 +106,72 @@ func (g *EldenRing) Analyze(src archive.Source, entries []archive.Entry) []Found
 
 	me2 := len(bb["modengine2_launcher.exe"]) > 0 || len(bb["launchmod_eldenring.bat"]) > 0 ||
 		len(bb["config_eldenring.toml"]) > 0 || len(bb["regulation.bin"]) > 0
-	if !me2 {
-		for _, e := range entries {
-			if e.Dir && strings.Count(e.Name, "/") <= 1 && me2Dirs[strings.ToLower(path.Base(e.Name))] {
-				me2 = true
-				break
-			}
+	for _, e := range entries {
+		if me2 {
+			break
 		}
+		me2 = !e.Dir && fromSoftExts[strings.ToLower(path.Ext(e.Name))]
 	}
 	if me2 {
 		return []Found{{Kind: "me2", Name: base, ModID: strings.ToLower(base), Unsupported: "needs_modengine"}}
 	}
+	return dllMod(bb, entries, base)
+}
 
-	// DLL mods for the Elden Mod Loader. Many other games use DLLs too, so
-	// downloads that clearly belong to another game are skipped.
+// dllMod detects a DLL mod for the Elden Mod Loader. Lots of downloads
+// contain DLLs (programs, installers, mod loaders of other games), so it
+// needs a clear sign: the DLLs sit in a "mods" folder, a DLL comes with a
+// config file of the same name, or the download is named after the game.
+func dllMod(bb map[string][]string, entries []archive.Entry, base string) []Found {
 	if foreignMod(bb, entries) {
 		return nil
 	}
 	var dlls []archive.Entry
 	for _, e := range entries {
-		if !e.Dir && strings.EqualFold(path.Ext(e.Name), ".dll") {
+		if e.Dir {
+			continue
+		}
+		name := strings.ToLower(e.Base())
+		ext := path.Ext(name)
+		if programExts[ext] || strings.HasSuffix(name, ".deps.json") || strings.HasSuffix(name, ".runtimeconfig.json") {
+			return nil
+		}
+		if ext == ".dll" && name != "dinput8.dll" && name != "ersc.dll" {
 			dlls = append(dlls, e)
 		}
 	}
-	if len(dlls) == 0 {
+	if len(dlls) == 0 || len(dlls) > 4 {
 		return nil
 	}
 	key := ""
+	inMods := false
 	if i := indexModsDir(dlls[0].Name); i >= 0 {
-		key = dlls[0].Name[:i]
-	} else {
+		key, inMods = dlls[0].Name[:i], true
+		for _, d := range dlls[1:] {
+			inMods = inMods && under(d.Name, key)
+		}
+	}
+	if !inMods {
 		key = dirOf(dlls[0].Name)
 		for _, d := range dlls[1:] {
 			for !under(d.Name, key) {
 				key = dirOf(key)
 			}
 		}
+	}
+	withConfig := false
+	for _, d := range dlls {
+		stem := strings.TrimSuffix(d.Name, path.Ext(d.Name))
+		for _, e := range entries {
+			ext := strings.ToLower(path.Ext(e.Name))
+			if !e.Dir && (ext == ".ini" || ext == ".toml") && strings.EqualFold(strings.TrimSuffix(e.Name, path.Ext(e.Name)), stem) {
+				withConfig = true
+			}
+		}
+	}
+	named := strings.Contains(strings.ToLower(base), "elden")
+	if !inMods && !withConfig && !named {
+		return nil
 	}
 	var parts []string
 	for _, e := range entries {
