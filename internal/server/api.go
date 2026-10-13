@@ -439,7 +439,8 @@ func sortItems(items []itemView) {
 // ---------- installing ----------
 
 type installResult struct {
-	File    string `json:"file"` // the download the mod came from
+	Source  string `json:"source"` // the download the mod came from (full path)
+	File    string `json:"file"`   // its file name
 	Name    string `json:"name"`
 	Version string `json:"version,omitempty"`
 	Status  string `json:"status"` // status before the install: new, update, older
@@ -496,7 +497,7 @@ func (s *Server) handleInstall(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		status, _, _ := g.Status(loc, inst, f, m)
-		results = append(results, installResult{File: filepath.Base(it.Path), Name: f.Name, Version: f.Version, Status: status, Kind: f.Kind})
+		results = append(results, installResult{Source: it.Path, File: filepath.Base(it.Path), Name: f.Name, Version: f.Version, Status: status, Kind: f.Kind})
 		done = append(done, f)
 		installedPaths = append(installedPaths, it.Path)
 		inst = g.Installed(loc, m)

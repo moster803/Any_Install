@@ -398,13 +398,15 @@
     return out;
   }
 
-  // Number of downloads with something selected; a pack counts once.
+  // The downloads with something selected; a pack counts once.
   function selectedDownloads() {
     return new Set(selectedItems().map((x) => x.path));
   }
 
+  // The button counts mods, so a pack with 17 mods counts 17; the list
+  // shows one row per download and says how many mods a pack contains.
   function footNew() {
-    const n = selectedDownloads().size;
+    const n = selectedItems().length;
     const label = n === 0 ? t("install_0") : n === 1 ? t("install_1") : t("install_n", { n });
     return `<footer class="foot">
       <div class="drop">${icon("tray")}<span>${esc(t("drop"))}</span>
@@ -493,10 +495,10 @@
     // One line per download, so an overhaul pack is one line.
     const groups = [];
     for (const x of r.installed) {
-      const g = groups.find((g) => x.file && g.file === x.file);
-      if (g) g.items.push(x); else groups.push({ file: x.file, items: [x] });
+      const g = groups.find((g) => x.source && g.source === x.source);
+      if (g) g.items.push(x); else groups.push({ source: x.source, file: x.file, items: [x] });
     }
-    const n = groups.length;
+    const n = r.installed.length;
     const list = groups.map((g) => {
       if (g.items.length > 1) {
         const name = g.file.replace(/\.(zip|7z|rar|jar|mrpack)$/i, "");
@@ -592,7 +594,7 @@
     const items = selectedItems();
     if (!items.length) return;
     const paths = selectedDownloads();
-    const busy = paths.size === 1 ? t("installing_1") : t("installing_n", { n: paths.size });
+    const busy = items.length === 1 ? t("installing_1") : t("installing_n", { n: items.length });
     // Big packs take a while to unpack; say so, so nobody closes the window.
     const total = S.scan.items.filter((it) => paths.has(it.path)).reduce((sum, it) => sum + (it.size || 0), 0);
     S.busyHint = total > 500 * 1024 * 1024 ? t("big_download", { size: fmtSize(total) }) : "";
