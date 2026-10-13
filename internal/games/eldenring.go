@@ -104,13 +104,18 @@ func (g *EldenRing) Analyze(src archive.Source, entries []archive.Entry) []Found
 		}
 	}
 
-	me2 := len(bb["modengine2_launcher.exe"]) > 0 || len(bb["launchmod_eldenring.bat"]) > 0 ||
-		len(bb["config_eldenring.toml"]) > 0 || len(bb["regulation.bin"]) > 0
-	for _, e := range entries {
-		if me2 {
-			break
+	// Other FromSoftware games (Dark Souls, Sekiro, Armored Core) use the
+	// same file types, so those only count for downloads named after Elden
+	// Ring. The Elden Ring launch files of Mod Engine 2 always count.
+	me2 := len(bb["launchmod_eldenring.bat"]) > 0 || len(bb["config_eldenring.toml"]) > 0
+	if !me2 && namedEldenRing(base) {
+		me2 = len(bb["modengine2_launcher.exe"]) > 0 || len(bb["regulation.bin"]) > 0
+		for _, e := range entries {
+			if me2 {
+				break
+			}
+			me2 = !e.Dir && fromSoftExts[strings.ToLower(path.Ext(e.Name))]
 		}
-		me2 = !e.Dir && fromSoftExts[strings.ToLower(path.Ext(e.Name))]
 	}
 	if me2 {
 		return []Found{{Kind: "me2", Name: base, ModID: strings.ToLower(base), Unsupported: "needs_modengine"}}
@@ -118,10 +123,17 @@ func (g *EldenRing) Analyze(src archive.Source, entries []archive.Entry) []Found
 	return dllMod(bb, entries, base)
 }
 
+// namedEldenRing reports whether a download's name mentions the game.
+func namedEldenRing(base string) bool {
+	b := strings.ToLower(base)
+	return strings.Contains(b, "elden") || strings.Contains(b, "erdtree")
+}
+
 // dllMod detects a DLL mod for the Elden Mod Loader. Lots of downloads
-// contain DLLs (programs, installers, mod loaders of other games), so it
-// needs a clear sign: the DLLs sit in a "mods" folder, a DLL comes with a
-// config file of the same name, or the download is named after the game.
+// contain DLLs (programs, installers, mods for other games), so it needs a
+// clear sign: a DLL comes with a config file of the same name, as Elden Mod
+// Loader mods do, or the download is named after the game. A "mods" folder
+// only decides what gets copied.
 func dllMod(bb map[string][]string, entries []archive.Entry, base string) []Found {
 	if foreignMod(bb, entries) {
 		return nil
@@ -169,8 +181,7 @@ func dllMod(bb map[string][]string, entries []archive.Entry, base string) []Foun
 			}
 		}
 	}
-	named := strings.Contains(strings.ToLower(base), "elden")
-	if !inMods && !withConfig && !named {
+	if !withConfig && !namedEldenRing(base) {
 		return nil
 	}
 	var parts []string

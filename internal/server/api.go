@@ -385,7 +385,7 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 func dedupe(items []itemView) []itemView {
 	type ref struct{ item, mod int }
 	key := func(m modView) string {
-		return m.Kind + "|" + strings.ToLower(m.ModID) + "|" + m.Version + "|" + m.Loader
+		return m.Kind + "|" + strings.ToLower(m.ModID) + "|" + m.Version + "|" + m.Loader + "|" + m.MCVersion
 	}
 	better := func(a, b itemView) bool {
 		if (a.Kind == "dir") != (b.Kind == "dir") {

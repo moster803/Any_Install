@@ -152,7 +152,7 @@ func TestEldenRingAnalyze(t *testing.T) {
 	if len(f) != 1 || f[0].Kind != "dllmod" || f[0].Key != "Roll/mods" || f[0].Name != "Roll" {
 		t.Errorf("dll mod: %+v", f)
 	}
-	f = analyze(t, g, "reforged.zip", map[string]string{"regulation.bin": "", "parts/a.dcx": ""})
+	f = analyze(t, g, "Elden Ring Reforged.zip", map[string]string{"regulation.bin": "", "parts/a.dcx": ""})
 	if len(f) != 1 || f[0].Unsupported != "needs_modengine" {
 		t.Errorf("me2: %+v", f)
 	}
@@ -294,7 +294,18 @@ func TestEldenRingIgnoresOtherDLLDownloads(t *testing.T) {
 	if f := analyze(t, g, "EldenRing_NoHUD.zip", map[string]string{"NoHUD.dll": "MZ"}); len(f) != 1 || f[0].Kind != "dllmod" {
 		t.Errorf("DLL in download named after the game: %+v", f)
 	}
-	if f := analyze(t, g, "armor.zip", map[string]string{"parts/am_m_1000.partsbnd.dcx": ""}); len(f) != 1 || f[0].Kind != "me2" {
+	// A DLL in a "mods" folder alone is common in other games too.
+	if f := analyze(t, g, "HollowMod.zip", map[string]string{"Mods/HollowMod.dll": "MZ"}); len(f) != 0 {
+		t.Errorf("other game's mods folder detected: %+v", f)
+	}
+	// FromSoftware files only count when the download is about Elden Ring.
+	if f := analyze(t, g, "Elden Ring Armor.zip", map[string]string{"parts/am_m_1000.partsbnd.dcx": ""}); len(f) != 1 || f[0].Kind != "me2" {
 		t.Errorf("Mod Engine 2 files: %+v", f)
+	}
+	if f := analyze(t, g, "DS3 Armor.zip", map[string]string{"parts/am_m_1000.partsbnd.dcx": ""}); len(f) != 0 {
+		t.Errorf("Dark Souls mod detected as Elden Ring: %+v", f)
+	}
+	if f := analyze(t, g, "Reforged (1).zip", map[string]string{"config_eldenring.toml": "", "regulation.bin": ""}); len(f) != 1 || f[0].ModID != "reforged" {
+		t.Errorf("duplicate download suffix kept in id: %+v", f)
 	}
 }
