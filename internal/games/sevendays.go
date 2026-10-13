@@ -156,6 +156,12 @@ func (g *SevenDays) Analyze(src archive.Source, entries []archive.Entry) []Found
 	data, _ := src.ReadFiles(markers, 1<<20)
 	var out []Found
 	for _, root := range roots {
+		// Packs that bring a whole game copy also contain the game's own
+		// mods (0_TFP_Harmony). The game already has them; a second copy
+		// would be loaded twice.
+		if strings.HasPrefix(strings.ToLower(path.Base(root)), "0_tfp_") {
+			continue
+		}
 		var mi ModInfo
 		for _, m := range markers {
 			if dirOf(m) == root {

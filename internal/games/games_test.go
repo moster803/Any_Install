@@ -309,3 +309,16 @@ func TestEldenRingIgnoresOtherDLLDownloads(t *testing.T) {
 		t.Errorf("duplicate download suffix kept in id: %+v", f)
 	}
 }
+
+func TestSevenDaysPackSkipsGameMods(t *testing.T) {
+	g := &SevenDays{}
+	mi := func(name string) string { return `<xml><Name value="` + name + `"/><Version value="1.0"/></xml>` }
+	f := analyze(t, g, "Overhaul-Launcher.zip", map[string]string{
+		"Game/Mods/0_TFP_Harmony/ModInfo.xml": mi("0_TFP_Harmony"),
+		"Game/Mods/0-SCore/ModInfo.xml":       mi("0-SCore"),
+		"Game/Mods/BdubsVehicles/ModInfo.xml": mi("BdubsVehicles"),
+	})
+	if len(f) != 2 || f[0].ModID != "0-SCore" || f[1].ModID != "BdubsVehicles" {
+		t.Errorf("pack mods = %+v, want 0-SCore and BdubsVehicles without the game's Harmony", f)
+	}
+}

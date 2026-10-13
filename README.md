@@ -19,6 +19,8 @@ Stelle im Spiel. Eine einzige Datei, keine Installation, läuft unter Windows un
 3. Die neuen Mods sind schon angehakt. Auf **„Mods installieren“** klicken, fertig.
 
 Fehlt eine Datei in der Liste, zieh sie einfach ins Fenster oder tippe auf „Datei auswählen“.
+Pakete mit vielen Mods (z. B. Overhauls wie War3zuk AIO) erscheinen als ein Eintrag. Über
+„Mods anzeigen“ lassen sich einzelne Mods daraus abwählen.
 
 | | |
 |---|---|
