@@ -100,7 +100,9 @@ go run . --demo          # starten im Demo-Modus
 scripts/build.sh v0.1.0  # Windows- und Linux-Datei nach dist/
 ```
 
-Bei jedem Push baut GitHub Actions beide Dateien. Bei einem Tag `v*` landen sie als Release auf GitHub.
+Bei jedem Push baut GitHub Actions beide Dateien. **Neue Version veröffentlichen:** in der Datei
+`VERSION` die Nummer erhöhen (z. B. `v0.2.0`) und nach `main` mergen. GitHub legt dann die
+Release-Seite mit `AnyInstall.exe` und der Linux-Datei an.
 
 Aufbau:
 
