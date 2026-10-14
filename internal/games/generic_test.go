@@ -283,9 +283,11 @@ func TestDetectListsModdableGames(t *testing.T) {
 	root := t.TempDir()
 	st := filepath.Join(root, "Steam")
 	add := func(id int, name string, files ...string) {
-		touch(t, filepath.Join(st, "steamapps", "common", name), files...)
+		// Steam's folder names never contain characters Windows forbids.
+		dir := strings.NewReplacer(":", "", "'", "").Replace(name)
+		touch(t, filepath.Join(st, "steamapps", "common", dir), files...)
 		os.WriteFile(filepath.Join(st, "steamapps", "appmanifest_"+strconv.Itoa(id)+".acf"),
-			[]byte(`"AppState" { "appid" "`+strconv.Itoa(id)+`" "name" "`+name+`" "installdir" "`+name+`" }`), 0o644)
+			[]byte(`"AppState" { "appid" "`+strconv.Itoa(id)+`" "name" "`+name+`" "installdir" "`+dir+`" }`), 0o644)
 	}
 	add(1, "Unity Game", "G.exe", "BepInEx/core/BepInEx.dll")
 	add(2, "Unreal Game", "U.exe", "U/Content/Paks/U.pak")
