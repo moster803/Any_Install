@@ -37,6 +37,7 @@
     pathInput: "",
     folderPanel: false,
     folderInput: false,
+    pickFilter: "",
   };
 
   // ---------- helpers ----------
@@ -212,6 +213,12 @@
     return `${topBar()}<div class="empty"><div class="spinner"></div><span>${esc(t("loading"))}</span></div><div></div>`;
   }
 
+  // The label on a game tile: which kind of mods Any Install installs.
+  function sysLabel(g) {
+    const sys = g.location?.system;
+    return sys ? t("sys_" + sys) : t("found");
+  }
+
   function viewPick() {
     const st = S.state;
     const steam = st.steam.found
@@ -220,27 +227,40 @@
           games: plural(st.steam.games, "games_1", "games_n"),
         }))}</span>`
       : `<span class="found missing">${icon("warn")}${esc(t("steam_missing"))}</span>`;
-    const tiles = st.games.map((g) => {
+    const found = st.games.filter((g) => g.location.found);
+    const missing = st.games.filter((g) => !g.location.found && !g.location.refused);
+    const refused = st.games.filter((g) => g.location.refused);
+    const filter = S.pickFilter.trim().toLowerCase();
+    const shown = (g) => !filter || g.name.toLowerCase().includes(filter);
+    const tile = (g) => {
       const l = g.location;
+      if (l.refused) {
+        return `<div class="tile missing" data-name="${esc(g.name.toLowerCase())}"${shown(g) ? "" : " hidden"}>${coverHTML(g)}
+          <div class="tile-info"><b>${esc(g.name)}</b><span class="pill muted">${esc(t("refused"))}</span>
+          <small>${esc(t("note." + l.refused))}</small></div></div>`;
+      }
       if (l.found) {
         const custom = l.via === "custom"
           ? `<small>${esc(t("via_custom"))} · <button class="link" data-action="reset-path" data-game="${esc(g.id)}">${esc(t("reset_path"))}</button></small>` : "";
-        return `<div class="tile ok ${S.game === g.id ? "sel" : ""}">
+        return `<div class="tile ok ${S.game === g.id ? "sel" : ""}" data-name="${esc(g.name.toLowerCase())}"${shown(g) ? "" : " hidden"}>
           <button class="tile-hit" data-action="pick-game" data-game="${esc(g.id)}" aria-label="${esc(g.name)}">${coverHTML(g)}</button>
-          <div class="tile-info"><b>${esc(g.name)}</b><span class="pill new">${esc(t("found"))}</span>
+          <div class="tile-info"><b>${esc(g.name)}</b><span class="pill new">${esc(sysLabel(g))}</span>
           <small>${esc(shownPath(l.modsDir))}</small>${custom}</div></div>`;
       }
       const input = S.pathInput === g.id
         ? `<div class="field"><input id="path-${esc(g.id)}" placeholder="${esc(t("path_prompt"))}" autocomplete="off">
            <button class="btn" data-action="save-path" data-game="${esc(g.id)}">${esc(t("save"))}</button></div>` : "";
-      return `<div class="tile missing">${coverHTML(g)}
+      return `<div class="tile missing" data-name="${esc(g.name.toLowerCase())}"${shown(g) ? "" : " hidden"}>${coverHTML(g)}
         <div class="tile-info"><b>${esc(g.name)}</b><span class="pill muted">${esc(t("not_found"))}</span>
         <button class="btn" data-action="choose-path" data-game="${esc(g.id)}">${icon("folder")}${esc(t("choose_folder"))}</button>${input}</div></div>`;
-    }).join("");
+    };
+    const search = found.length > 6
+      ? `<input id="game-search" class="search" type="search" placeholder="${esc(t("search_games"))}" value="${esc(S.pickFilter)}" autocomplete="off" spellcheck="false">` : "";
     return `${topBar()}<div class="pick">
       <div style="display:grid;gap:8px">${steam}
-        <h1 class="h1">${esc(t("pick_title"))}</h1><p class="sub">${esc(t("pick_sub"))}</p></div>
-      <div class="tiles">${tiles}</div>
+        <h1 class="h1">${esc(t("pick_title"))}</h1><p class="sub">${esc(plural(found.length, "pick_sub_1", "pick_sub"))}</p>${search}</div>
+      <div class="tiles">${found.map(tile).join("")}${missing.map(tile).join("")}${refused.map(tile).join("")}</div>
+      <p class="sub small">${esc(t("pick_more"))}</p>
     </div><div></div>`;
   }
 
@@ -302,9 +322,23 @@
   // Hints about the game's folder (for example a Proton prefix that does
   // not exist yet) and, for Minecraft, the mod loaders.
   function gameBanners() {
-    const notes = (loc().notes || []).filter((n) => n.code !== "mc_loader_found");
-    return notes.map((n) => `<div class="banner ${n.level === "info" ? "info" : "warn"}">${icon(n.level === "info" ? "info" : "warn")}<span>${esc(noteText(n))}</span></div>`).join("")
-      + minecraftBanner();
+    const notes = (loc().notes || []).filter((n) => n.code !== "mc_loader_found" && (S.tab === "new" || n.code !== "hint_pick"));
+    return notes.map(bannerHTML).join("") + minecraftBanner();
+  }
+
+  // A note as a banner. A launch option gets a copy button, a web page a
+  // link.
+  function bannerHTML(n) {
+    const lvl = n.level === "info" ? "info" : "warn";
+    let extra = "";
+    if (n.params?.option) {
+      extra += `<span class="codeline"><code>${esc(n.params.option)}</code>
+        <button class="btn-ghost" data-action="copy" data-text="${esc(n.params.option)}">${esc(t("copy"))}</button></span>`;
+    }
+    if (n.params?.url && /^https:\/\//.test(n.params.url)) {
+      extra += `<a class="link" href="${esc(n.params.url)}" target="_blank" rel="noopener noreferrer">${esc(t("open_page"))}</a>`;
+    }
+    return `<div class="banner ${lvl}">${icon(lvl)}<span>${esc(noteText(n))}${extra}</span></div>`;
   }
 
   // Minecraft: which mod loaders are set up, and a button to set up Fabric
@@ -517,7 +551,7 @@
         ? (x.version ? t("done_update_v", { v: x.version }) : t("done_update")) : t("done_new");
       return `<li>${icon("check")}<b>${esc(x.name)}</b><span class="muted">${esc(what)}</span></li>`;
     }).join("");
-    const tip = (n) => `<div class="banner ${n.level === "warn" ? "warn" : "info"}">${icon(n.level === "warn" ? "warn" : "info")}<span>${esc(noteText(n))}</span></div>`;
+    const tip = bannerHTML;
     // Warnings come before the start button, general tips after it.
     const warnings = (r.tips || []).filter((n) => n.level === "warn").map(tip).join("");
     const infos = (r.tips || []).filter((n) => n.level !== "warn").map(tip).join("");
@@ -710,6 +744,9 @@
       render();
     },
     "show-others"() { S.showOthers = !S.showOthers; render(); },
+    async copy(el) {
+      try { await navigator.clipboard.writeText(el.dataset.text); toast(t("toast_copied")); } catch (e) { /* the text stays visible to copy by hand */ }
+    },
     install,
     "pick-file"() { $app.querySelector("#file-input")?.click(); },
     async "toggle-mod"(el) {
@@ -817,6 +854,14 @@
     if ((ev.key === " " || ev.key === "Enter") && ev.target.matches?.('[role="checkbox"][data-action]')) onAction(ev);
     if (ev.key === "Escape" && (S.dialog || S.folderPanel)) { S.dialog = null; S.folderPanel = false; render(); }
     if (ev.key === "Enter" && ev.target.id === "coop-pw") actions["save-coop"]();
+  });
+  // Filtering the game list hides tiles instead of drawing the page again,
+  // so the search field keeps the focus.
+  $app.addEventListener("input", (ev) => {
+    if (ev.target.id !== "game-search") return;
+    S.pickFilter = ev.target.value;
+    const f = S.pickFilter.trim().toLowerCase();
+    for (const el of $app.querySelectorAll(".tile[data-name]")) el.hidden = !!f && !el.dataset.name.includes(f);
   });
   $app.addEventListener("change", (ev) => {
     if (ev.target.id === "file-input" && ev.target.files.length) importFiles(ev.target.files);

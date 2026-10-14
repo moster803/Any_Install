@@ -11,3 +11,13 @@ func downloadsDirOS() string {
 	}
 	return p
 }
+
+// documentsDirOS asks Windows for the documents folder, which OneDrive or
+// the user may have moved.
+func documentsDirOS() string {
+	p, err := windows.KnownFolderPath(windows.FOLDERID_Documents, 0)
+	if err != nil {
+		return ""
+	}
+	return p
+}

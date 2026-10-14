@@ -277,3 +277,74 @@ func TestScanShowsEachModOnce(t *testing.T) {
 		t.Errorf("Neues HUD listed from %v, want only the newest zip", files)
 	}
 }
+
+func TestGenericGames(t *testing.T) {
+	s, base, env := testServer(t)
+	var state struct {
+		Games []struct {
+			ID       string `json:"id"`
+			Name     string `json:"name"`
+			Location struct {
+				Found   bool   `json:"found"`
+				System  string `json:"system"`
+				Refused string `json:"refused"`
+			} `json:"location"`
+		} `json:"games"`
+	}
+	call(t, s, "GET", base+"/api/state", nil, &state)
+	var got []string
+	for _, g := range state.Games {
+		got = append(got, g.ID+"="+g.Location.System+g.Location.Refused)
+	}
+	want := "7dtd=,eldenring=,minecraft=,steam-227300=scs,steam-990080=unreal,steam-413150=smapi,steam-489830=refused_loadorder,steam-892970=bepinex"
+	if strings.Join(got, ",") != want {
+		t.Fatalf("games = %v\nwant %s", got, want)
+	}
+
+	// Valheim: only the BepInEx mod is offered, and not ticked, because
+	// it could as well be for another game.
+	var scan scanResp
+	call(t, s, "GET", base+"/api/scan?game=steam-892970", nil, &scan)
+	if len(scan.Items) != 1 || scan.Items[0].File != "Azumatt-ValheimPlus-0.9.9.zip" || scan.Items[0].Mods[0].Checked {
+		t.Fatalf("valheim scan = %+v", scan.Items)
+	}
+	it := scan.Items[0]
+	var res struct {
+		Installed []struct{ Name string } `json:"installed"`
+	}
+	if code := call(t, s, "POST", base+"/api/install", map[string]any{"game": "steam-892970", "items": []map[string]string{{"path": it.Path, "key": it.Mods[0].Key}}}, &res); code != 200 {
+		t.Fatalf("install: %d", code)
+	}
+	// The package's plugins folder becomes BepInEx/plugins/ValheimPlus.
+	plugin := filepath.Join(env["ANYINSTALL_STEAM"], "steamapps", "common", "Valheim", "BepInEx", "plugins", "ValheimPlus", "ValheimPlus.dll")
+	if _, err := os.Stat(plugin); err != nil {
+		t.Fatalf("plugin not installed: %v", err)
+	}
+	var inst struct {
+		Items []struct {
+			ID, Name, Version string
+			Enabled           bool
+		} `json:"items"`
+	}
+	call(t, s, "GET", base+"/api/installed?game=steam-892970", nil, &inst)
+	if len(inst.Items) != 2 || inst.Items[1].Name != "ValheimPlus" || inst.Items[1].Version != "0.9.9" {
+		t.Fatalf("installed = %+v", inst.Items)
+	}
+	if code := call(t, s, "POST", base+"/api/undo", map[string]string{"game": "steam-892970"}, nil); code != 200 {
+		t.Fatalf("undo: %d", code)
+	}
+	if _, err := os.Stat(plugin); err == nil {
+		t.Error("undo left the plugin")
+	}
+
+	// Stardew Valley mods have a manifest with a UniqueID: ticked.
+	call(t, s, "GET", base+"/api/scan?game=steam-413150", nil, &scan)
+	if len(scan.Items) != 1 || !scan.Items[0].Mods[0].Checked {
+		t.Fatalf("stardew scan = %+v", scan.Items)
+	}
+
+	// Skyrim is listed but cannot be used.
+	if code := call(t, s, "GET", base+"/api/scan?game=steam-489830", nil, nil); code != http.StatusNotFound {
+		t.Errorf("skyrim scan: %d", code)
+	}
+}

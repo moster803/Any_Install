@@ -514,3 +514,51 @@ func CopyFile(src, dst string) error {
 
 // CopyTree is exported for the installer's cross-drive fallback.
 func CopyTree(src, dst string) error { return copyTree(src, dst) }
+
+// ---------- single mod files ----------
+
+// fileSource is a mod that is one file, like a .pak or a .dll. Its only
+// entry is the file name.
+type fileSource struct {
+	path string
+	size int64
+}
+
+func (f *fileSource) Path() string { return f.path }
+func (f *fileSource) Kind() string { return "file" }
+func (f *fileSource) Close() error { return nil }
+
+func (f *fileSource) name() string { return filepath.Base(f.path) }
+
+func (f *fileSource) Entries() ([]Entry, error) {
+	return []Entry{{Name: f.name(), Size: f.size}}, nil
+}
+
+func (f *fileSource) ReadFiles(want []string, maxSize int64) (map[string][]byte, error) {
+	out := map[string][]byte{}
+	for _, n := range want {
+		if n != f.name() || f.size > maxSize {
+			continue
+		}
+		b, err := os.ReadFile(f.path)
+		if err != nil {
+			return nil, err
+		}
+		out[n] = b
+	}
+	return out, nil
+}
+
+func (f *fileSource) Extract(prefix, dst string) error {
+	if prefix == "" {
+		dst = filepath.Join(dst, f.name())
+	} else if prefix != f.name() {
+		return os.ErrNotExist
+	}
+	in, err := os.Open(f.path)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	return writeFile(dst, "", 0o644, in)
+}

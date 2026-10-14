@@ -50,7 +50,8 @@ func sevenDaysUserData(env *Env, gameDir string) (dir string, proton bool, notes
 		}
 	}
 	native := nativeUserData(env)
-	inPfx := filepath.Join(protonPrefix(env, gameDir, 251570), "drive_c", "users", "steamuser", "AppData", "Roaming", "7DaysToDie")
+	pfx := protonPrefix(env, gameDir, 251570)
+	inPfx := filepath.Join(prefixUser(pfx), "AppData", "Roaming", "7DaysToDie")
 	var tool string
 	if env.Steam != nil {
 		// When Steam's settings can't be read, tool stays "" and the
@@ -59,7 +60,7 @@ func sevenDaysUserData(env *Env, gameDir string) (dir string, proton bool, notes
 	}
 	switch {
 	case tool != "" && !strings.HasPrefix(strings.ToLower(tool), "steamlinuxruntime"):
-		if !protonReady(inPfx) {
+		if !protonReady(pfx) {
 			notes = append(notes, note("warn", "proton_no_prefix"))
 		}
 		return inPfx, true, notes
@@ -74,25 +75,25 @@ func sevenDaysUserData(env *Env, gameDir string) (dir string, proton bool, notes
 	return native, false, nil
 }
 
-// protonReady reports whether Proton has set up the prefix that holds the
-// user data folder ud (<pfx>/drive_c/users/steamuser/AppData/Roaming/
-// 7DaysToDie). Proton does that at the first start of the game. Folders
-// alone don't count: opening the Mods folder creates them.
-func protonReady(ud string) bool {
-	pfx := ud
-	for range 6 {
-		pfx = filepath.Dir(pfx)
-	}
+// protonReady reports whether Proton has set up a prefix. Proton does that
+// at the first start of the game. Folders alone don't count: opening the
+// Mods folder creates them.
+func protonReady(pfx string) bool {
 	return exists(filepath.Join(pfx, "system.reg"))
 }
 
 // Ready returns ErrStartGameFirst when nothing may be written to the
 // game's mods folder yet.
 func Ready(loc Location) error {
-	if loc.Proton && !protonReady(loc.Root) {
+	if loc.WaitStart || (loc.Prefix != "" && !protonReady(loc.Prefix)) {
 		return ErrStartGameFirst
 	}
 	return nil
+}
+
+// prefixUser is the Windows user folder inside a Proton prefix.
+func prefixUser(pfx string) string {
+	return filepath.Join(pfx, "drive_c", "users", "steamuser")
 }
 
 // nativeUserData is the Linux version's user data folder: the data folder
@@ -170,12 +171,17 @@ func (g *SevenDays) Locate(env *Env) Location {
 		return Location{} // not the 7 Days to Die folder
 	}
 	ud, proton, notes := sevenDaysUserData(env, dir)
+	var prefix string
+	if proton {
+		prefix = protonPrefix(env, dir, g.AppID())
+	}
 	return Location{
 		Found:   true,
 		Root:    ud,
 		ModsDir: filepath.Join(ud, "Mods"),
 		Via:     via,
 		Proton:  proton,
+		Prefix:  prefix,
 		Notes:   notes,
 		GameDir: dir,
 		Backup:  filepath.Join(ud, "AnyInstall-Backup"),

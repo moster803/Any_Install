@@ -58,6 +58,17 @@ func SupportedExt(name string) bool {
 	case ".zip", ".7z", ".rar", ".jar", ".mrpack":
 		return true
 	}
+	return ModFileExt(name)
+}
+
+// ModFileExt reports whether a file is a mod by itself, without an
+// archive around it: Unreal Engine paks, plugin DLLs, truck simulator
+// .scs files and Sims 4 packages and scripts.
+func ModFileExt(name string) bool {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".pak", ".utoc", ".ucas", ".dll", ".scs", ".package", ".ts4script":
+		return true
+	}
 	return false
 }
 
@@ -78,6 +89,9 @@ func Open(p string) (Source, error) {
 		return open7z(p)
 	case ".rar":
 		return openRar(p)
+	}
+	if ModFileExt(p) {
+		return &fileSource{path: p, size: st.Size()}, nil
 	}
 	return nil, fmt.Errorf("unsupported file type %q", ext)
 }
@@ -183,7 +197,9 @@ func writeFile(dst, rel string, mode fs.FileMode, r io.Reader) error {
 		return err
 	}
 	perm := fs.FileMode(0o644)
-	if mode&0o111 != 0 {
+	// Start scripts of Linux mod loaders (start_game_bepinex.sh) often
+	// lose their executable flag in zips made on Windows.
+	if mode&0o111 != 0 || strings.EqualFold(filepath.Ext(full), ".sh") {
 		perm = 0o755
 	}
 	f, err := os.OpenFile(full, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, perm)

@@ -20,6 +20,13 @@ Umgesetzt sind Etappe 1 und der größte Teil von Etappe 2 (Meine Mods mit Ein/A
 Entfernen, Rückgängig, Reparieren; Drag & Drop; „Spiel läuft“-Prüfung; weitere Suchordner).
 Wie es jetzt aussieht, zeigt die [README](../README.md).
 
+**Version 0.2 (14.10.2026): alle Steam-Spiele.** Statt nur fester Spiele erkennt Any Install
+jetzt jedes Steam-Spiel mit eindeutigem Mod-System (BepInEx, MelonLoader, Unreal-Paks,
+eigener Mods-Ordner) und kennt die Regeln einiger beliebter Spiele. Grundsätze dabei:
+nur anbieten, was sicher funktioniert; bei unbekannter Zuordnung nichts vorab anhaken;
+Spiele mit Ladereihenfolge oder Anti-Cheat bewusst auslassen. Welcher Download zu welchem
+Spiel gehört, entscheidet bei diesen Spielen der Nutzer.
+
 ---
 
 Ein kleines Programm, das Mods im Download-Ordner findet und sie richtig in den
