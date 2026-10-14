@@ -193,3 +193,19 @@ func (s *Steam) Cover(id int) string {
 	})
 	return found
 }
+
+// CompatTool returns the Steam Play compatibility tool the user forced for
+// a game in its properties (for example "proton_9" or "GE-Proton9-20"), or
+// "" when none is set. ok is false when Steam's settings could not be read.
+func (s *Steam) CompatTool(appID int) (name string, ok bool) {
+	b, err := os.ReadFile(filepath.Join(s.Root, "config", "config.vdf"))
+	if err != nil {
+		return "", false
+	}
+	kv, err := ParseVDF(string(b))
+	if err != nil {
+		return "", false
+	}
+	m := kv.Get("InstallConfigStore").Get("Software").Get("Valve").Get("Steam").Get("CompatToolMapping")
+	return m.Get(strconv.Itoa(appID)).Str("name"), true
+}

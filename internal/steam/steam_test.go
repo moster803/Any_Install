@@ -83,3 +83,35 @@ func TestFindAppsInLibraries(t *testing.T) {
 		t.Errorf("Cover = %q", c)
 	}
 }
+
+func TestCompatTool(t *testing.T) {
+	root := t.TempDir()
+	s := &Steam{Root: root}
+	if _, ok := s.CompatTool(251570); ok {
+		t.Error("no config.vdf should not be ok")
+	}
+	os.MkdirAll(filepath.Join(root, "config"), 0o755)
+	os.WriteFile(filepath.Join(root, "config", "config.vdf"), []byte(`"InstallConfigStore"
+{
+	"Software"
+	{
+		"valve"
+		{
+			"Steam"
+			{
+				"CompatToolMapping"
+				{
+					"0" { "name" "proton_experimental" "config" "" "priority" "75" }
+					"251570" { "name" "proton_9" "config" "" "priority" "250" }
+				}
+			}
+		}
+	}
+}`), 0o644)
+	if name, ok := s.CompatTool(251570); !ok || name != "proton_9" {
+		t.Errorf("251570 = %q, %v", name, ok)
+	}
+	if name, ok := s.CompatTool(1245620); !ok || name != "" {
+		t.Errorf("a game without its own setting = %q, %v (the default only applies to games without a Linux version)", name, ok)
+	}
+}

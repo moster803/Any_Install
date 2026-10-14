@@ -249,7 +249,7 @@
     return `<section class="gamehead">
       ${coverHTML(g, "thumb")}
       <div class="gh-text"><span class="gh-name">${esc(g.name)}</span>
-        <span class="gh-path" title="${esc(shownPath(loc().modsDir))}">${esc(t("mods_folder"))}: ${esc(shownPath(loc().modsDir))}</span></div>
+        <span class="gh-path" title="${esc(shownPath(loc().modsDir))}">${esc(t("mods_folder"))}${loc().proton ? " (Proton)" : ""}: ${esc(shownPath(loc().modsDir))}</span></div>
       <button class="btn-ghost" data-action="change-game">${esc(t("change_game"))}</button>
     </section>`;
   }
@@ -297,6 +297,14 @@
       }
     }
     return null;
+  }
+
+  // Hints about the game's folder (for example a Proton prefix that does
+  // not exist yet) and, for Minecraft, the mod loaders.
+  function gameBanners() {
+    const notes = (loc().notes || []).filter((n) => n.code !== "mc_loader_found");
+    return notes.map((n) => `<div class="banner ${n.level === "info" ? "info" : "warn"}">${icon(n.level === "info" ? "info" : "warn")}<span>${esc(noteText(n))}</span></div>`).join("")
+      + minecraftBanner();
   }
 
   // Minecraft: which mod loaders are set up, and a button to set up Fabric
@@ -385,9 +393,9 @@
       }
     }
     if (!rows) {
-      return minecraftBanner() + `<div class="empty">${icon("tray")}<b>${esc(t("empty_title"))}</b><span>${esc(t("empty_text"))}</span></div>` + others;
+      return gameBanners() + `<div class="empty">${icon("tray")}<b>${esc(t("empty_title"))}</b><span>${esc(t("empty_text"))}</span></div>` + others;
     }
-    return minecraftBanner() + `<div class="list">${rows}</div>` + others;
+    return gameBanners() + `<div class="list">${rows}</div>` + others;
   }
 
   function selectedItems() {
@@ -431,7 +439,7 @@
     if (!inst) return `<div class="empty"><div class="spinner"></div></div>`;
     let out = "";
     if (S.game === "eldenring" && inst.coop?.installed) out += coopCard(inst.coop.password);
-    out += minecraftBanner();
+    out += gameBanners();
     if (!inst.items.length) {
       return out + `<div class="empty">${icon("tray")}<b>${esc(t("mine_empty_title"))}</b><span>${esc(t("mine_empty_text"))}</span></div>`;
     }

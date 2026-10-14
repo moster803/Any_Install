@@ -3,13 +3,16 @@ package games
 import (
 	"bytes"
 	"encoding/xml"
+	"errors"
 	"io"
 	"os"
 	"path"
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/moster803/Any_Install/internal/archive"
 	"github.com/moster803/Any_Install/internal/install"
@@ -29,17 +32,95 @@ func (*SevenDays) Processes() []string { return []string{"7DaysToDie.exe", "7Day
 
 const disabledSuffix = "_disabled"
 
-func sevenDaysUserData() string {
+// ErrStartGameFirst means the game runs through Proton but has never been
+// started, so its prefix with the user data folder does not exist yet.
+var ErrStartGameFirst = errors.New("start the game once so that Proton creates its folder")
+
+// sevenDaysUserData returns the game's user data folder, whose Mods folder
+// the game loads. On Linux the game runs either natively or, when Proton
+// is forced in its Steam properties, as the Windows version. Then its
+// %APPDATA% is inside the Proton prefix next to the game's library.
+func sevenDaysUserData(env *Env, gameDir string) (dir string, proton bool, notes []Note) {
 	if d := os.Getenv("ANYINSTALL_7DTD_USERDATA"); d != "" {
-		return d
+		return d, false, nil
 	}
 	if runtime.GOOS == "windows" {
 		if app := os.Getenv("APPDATA"); app != "" {
-			return filepath.Join(app, "7DaysToDie")
+			return filepath.Join(app, "7DaysToDie"), false, nil
 		}
 	}
+	native := nativeUserData(env)
+	pfx := protonPrefix(gameDir, 251570)
+	inPfx := filepath.Join(pfx, "drive_c", "users", "steamuser", "AppData", "Roaming", "7DaysToDie")
+	var tool string
+	if env.Steam != nil {
+		tool, _ = env.Steam.CompatTool(251570)
+	}
+	switch {
+	case tool != "" && !strings.HasPrefix(strings.ToLower(tool), "steamlinuxruntime"):
+		if !isDir(pfx) {
+			// Proton creates its prefix at the first start.
+			notes = append(notes, note("warn", "proton_no_prefix"))
+		}
+		return inPfx, true, notes
+	case tool != "":
+		return native, false, nil
+	}
+	// Nothing forced by the user. Steam can still pick Proton by itself
+	// (on the Steam Deck, for example), so the folder used last wins.
+	if isDir(inPfx) && (!isDir(native) || lastUsed(inPfx).After(lastUsed(native))) {
+		return inPfx, true, nil
+	}
+	return native, false, nil
+}
+
+// nativeUserData is ~/.local/share/7DaysToDie, or the same folder inside
+// the sandbox of the Flatpak or Snap version of Steam when the game has
+// been started there.
+func nativeUserData(env *Env) string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".local", "share", "7DaysToDie")
+	def := filepath.Join(home, ".local", "share", "7DaysToDie")
+	var cands []string
+	if x := os.Getenv("XDG_DATA_HOME"); x != "" {
+		cands = append(cands, filepath.Join(x, "7DaysToDie"))
+	}
+	if env.Steam != nil {
+		root := filepath.Clean(env.Steam.Root)
+		suffix := string(filepath.Separator) + filepath.Join(".local", "share", "Steam")
+		if sandbox := strings.TrimSuffix(root, suffix); sandbox != root && sandbox != filepath.Clean(home) {
+			cands = append(cands, filepath.Join(sandbox, ".local", "share", "7DaysToDie"), filepath.Join(sandbox, "data", "7DaysToDie"))
+		}
+	}
+	for _, c := range cands {
+		if isDir(c) {
+			return c
+		}
+	}
+	return def
+}
+
+// protonPrefix is the Proton prefix of a game. Steam keeps it in the
+// library that holds the game (<library>/steamapps/common/<game>).
+func protonPrefix(gameDir string, appID int) string {
+	lib := filepath.Dir(filepath.Dir(filepath.Dir(gameDir)))
+	return filepath.Join(lib, "steamapps", "compatdata", strconv.Itoa(appID), "pfx")
+}
+
+// lastUsed is when the game last wrote to its user data folder (logs,
+// saves, settings). The folders Any Install itself writes to don't count.
+func lastUsed(dir string) time.Time {
+	var t time.Time
+	ents, _ := os.ReadDir(dir)
+	for _, e := range ents {
+		switch strings.ToLower(e.Name()) {
+		case "mods", "mods" + disabledSuffix, "anyinstall-backup":
+			continue
+		}
+		if info, err := e.Info(); err == nil && info.ModTime().After(t) {
+			t = info.ModTime()
+		}
+	}
+	return t
 }
 
 func (g *SevenDays) Locate(env *Env) Location {
@@ -50,12 +131,14 @@ func (g *SevenDays) Locate(env *Env) Location {
 	if via == "custom" && !exists(filepath.Join(dir, "7DaysToDie.exe")) && !exists(filepath.Join(dir, "7DaysToDie.x86_64")) && !isDir(filepath.Join(dir, "7DaysToDie_Data")) {
 		return Location{} // not the 7 Days to Die folder
 	}
-	ud := sevenDaysUserData()
+	ud, proton, notes := sevenDaysUserData(env, dir)
 	return Location{
 		Found:   true,
 		Root:    ud,
 		ModsDir: filepath.Join(ud, "Mods"),
 		Via:     via,
+		Proton:  proton,
+		Notes:   notes,
 		GameDir: dir,
 		Backup:  filepath.Join(ud, "AnyInstall-Backup"),
 		Allowed: []string{ud, dir},
@@ -148,18 +231,26 @@ func modRoots(markers []string) []string {
 }
 
 func (g *SevenDays) Analyze(src archive.Source, entries []archive.Entry) []Found {
-	markers := byBase(entries)["modinfo.xml"]
+	bases := byBase(entries)
+	markers := bases["modinfo.xml"]
 	if len(markers) == 0 {
 		return nil
 	}
 	roots := modRoots(markers)
 	data, _ := src.ReadFiles(markers, 1<<20)
+	// Packs made for a mod launcher bring a whole game copy, including the
+	// game's own mods (0_TFP_Harmony). Their mods are made for the game
+	// version in the pack, which may not be the one Steam has installed.
+	gameCopy := false
+	for _, b := range []string{"7daystodie.exe", "7daystodie.x86_64", "assembly-csharp.dll"} {
+		gameCopy = gameCopy || len(bases[b]) > 0
+	}
 	var out []Found
 	for _, root := range roots {
-		// Packs that bring a whole game copy also contain the game's own
-		// mods (0_TFP_Harmony). The game already has them; a second copy
-		// would be loaded twice.
+		// The game already has its own mods; a second copy would be
+		// loaded twice.
 		if strings.HasPrefix(strings.ToLower(path.Base(root)), "0_tfp_") {
+			gameCopy = true
 			continue
 		}
 		var mi ModInfo
@@ -196,6 +287,11 @@ func (g *SevenDays) Analyze(src archive.Source, entries []archive.Entry) []Found
 			}
 		}
 		out = append(out, f)
+	}
+	if gameCopy {
+		for i := range out {
+			out[i].Notes = []Note{note("warn", "game_copy")}
+		}
 	}
 	return out
 }
@@ -345,6 +441,11 @@ func (g *SevenDays) Status(loc Location, inst []Installed, f Found, _ *install.M
 }
 
 func (g *SevenDays) Plan(loc Location, inst []Installed, f Found) (install.Plan, error) {
+	for _, n := range loc.Notes {
+		if n.Code == "proton_no_prefix" {
+			return install.Plan{}, ErrStartGameFirst
+		}
+	}
 	dst := filepath.Join(loc.ModsDir, f.Folder)
 	if it := g.match(inst, f); it != nil {
 		dst = it.Paths[0]
@@ -409,10 +510,17 @@ func (g *SevenDays) Launch(Location) error { return sys.Open("steam://rungameid/
 
 func (g *SevenDays) Tips(loc Location, installed []Found) []Note {
 	var tips []Note
+	code := false
 	for _, f := range installed {
 		if f.HasCode {
+			code = true
 			tips = append(tips, note("warn", "tip_7dtd_eac", "mod", f.Name))
 		}
+	}
+	// Mods with code are made and tested on the Windows version of the
+	// game. Big ones often crash the native Linux version.
+	if code && runtime.GOOS == "linux" && !loc.Proton {
+		tips = append(tips, note("warn", "tip_7dtd_linux_proton"))
 	}
 	return append(tips, note("info", "tip_7dtd_coop"))
 }

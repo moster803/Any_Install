@@ -352,6 +352,7 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, f := range results[i].found {
 			status, iv, notes := g.Status(loc, inst, f, m)
+			notes = append(append([]games.Note{}, f.Notes...), notes...)
 			sel := status == games.StatusNew || status == games.StatusUpdate || status == games.StatusOlder
 			// Mods that would not work (wrong Minecraft version, missing
 			// loader) are offered but not ticked.
