@@ -471,6 +471,12 @@ func (s *Server) handleInstall(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusConflict, "game_running", nil, "game", g.Name())
 		return
 	}
+	// Checked before the backup folder is created, which may lie in the
+	// same not yet existing Proton prefix.
+	if err := games.Ready(loc); err != nil {
+		fail(w, http.StatusConflict, errorCode(err), err)
+		return
+	}
 	m := games.Manager(loc)
 	inst := g.Installed(loc, m)
 	tx, err := m.Begin(g.ID(), "install")
@@ -772,6 +778,10 @@ func (s *Server) handleOpen(w http.ResponseWriter, r *http.Request) {
 		switch req.What {
 		case "mods":
 			target = loc.ModsDir
+			if err := games.Ready(loc); err != nil {
+				fail(w, http.StatusConflict, errorCode(err), err)
+				return
+			}
 			_ = os.MkdirAll(target, 0o755)
 		case "game":
 			target = loc.GameDir

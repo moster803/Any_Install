@@ -405,7 +405,16 @@ func TestSevenDaysUserDataNativeAndProton(t *testing.T) {
 	if _, err := g.Plan(loc, nil, mod); !errors.Is(err, ErrStartGameFirst) {
 		t.Errorf("install before the first start: err = %v", err)
 	}
-	os.MkdirAll(inPfx, 0o755)
+	// Opening the Mods folder creates it, but Proton has still not set
+	// up its prefix.
+	os.MkdirAll(filepath.Join(inPfx, "Mods"), 0o755)
+	if loc = g.Locate(env); len(loc.Notes) != 1 || Ready(loc) == nil {
+		t.Errorf("folders alone are not a Proton prefix: %+v", loc)
+	}
+	if _, err := g.Plan(loc, nil, mod); !errors.Is(err, ErrStartGameFirst) {
+		t.Errorf("install into folders without a prefix: err = %v", err)
+	}
+	os.WriteFile(filepath.Join(pfx, "system.reg"), nil, 0o644)
 	loc = g.Locate(env)
 	if loc.ModsDir != filepath.Join(inPfx, "Mods") || !loc.Proton || len(loc.Notes) != 0 {
 		t.Fatalf("proton: %+v", loc)
@@ -436,9 +445,54 @@ func TestSevenDaysUserDataNativeAndProton(t *testing.T) {
 	if loc = g.Locate(env); loc.ModsDir != filepath.Join(native, "Mods") || loc.Proton {
 		t.Errorf("linux version used last: %+v", loc)
 	}
-	os.Chtimes(filepath.Join(inPfx, "logs"), time.Now(), time.Now())
+	// Playing only changes a file deep inside the saves.
+	save := filepath.Join(inPfx, "Saves", "Navezgane", "MyGame")
+	os.MkdirAll(save, 0o755)
+	os.WriteFile(filepath.Join(save, "main.ttw"), nil, 0o644)
+	for _, d := range []string{filepath.Join(inPfx, "Saves"), filepath.Join(inPfx, "Saves", "Navezgane"), save, filepath.Join(save, "main.ttw")} {
+		os.Chtimes(d, old, old)
+	}
+	if loc = g.Locate(env); loc.Proton {
+		t.Errorf("old saves in the prefix: %+v", loc)
+	}
+	os.Chtimes(filepath.Join(save, "main.ttw"), time.Now(), time.Now())
 	if loc = g.Locate(env); loc.ModsDir != filepath.Join(inPfx, "Mods") || !loc.Proton {
 		t.Errorf("proton used last: %+v", loc)
+	}
+}
+
+func TestSevenDaysProtonPrefixInGameLibrary(t *testing.T) {
+	home, env := sevenDaysWorld(t, "Games")
+	setCompatTool(t, env, "proton_9")
+	// A folder chosen by hand that is not inside a Steam library: the
+	// prefix is still the one in the library Steam runs the game from.
+	custom := filepath.Join(home, "Spiele", "7DTD")
+	os.MkdirAll(custom, 0o755)
+	os.WriteFile(filepath.Join(custom, "7DaysToDie.x86_64"), nil, 0o755)
+	env.Custom = map[string]string{"7dtd": custom}
+	loc := (&SevenDays{}).Locate(env)
+	want := filepath.Join(home, "Games", "steamapps", "compatdata", "251570", "pfx", "drive_c", "users", "steamuser", "AppData", "Roaming", "7DaysToDie", "Mods")
+	if loc.ModsDir != want {
+		t.Errorf("mods dir = %s, want %s", loc.ModsDir, want)
+	}
+}
+
+func TestSevenDaysNativeUserDataSandbox(t *testing.T) {
+	home, env := sevenDaysWorld(t, "")
+	sandbox := filepath.Join(home, ".var", "app", "com.valvesoftware.Steam")
+	env.Steam.Root = filepath.Join(sandbox, ".local", "share", "Steam")
+	if got, want := nativeUserData(env), filepath.Join(sandbox, ".local", "share", "7DaysToDie"); got != want {
+		t.Errorf("flatpak: %s, want %s", got, want)
+	}
+	env.Steam.Root = filepath.Join(home, ".local", "share", "Steam")
+	xdg := filepath.Join(home, "data")
+	t.Setenv("XDG_DATA_HOME", xdg)
+	if got := nativeUserData(env); got != filepath.Join(xdg, "7DaysToDie") {
+		t.Errorf("XDG_DATA_HOME before the first start: %s", got)
+	}
+	os.MkdirAll(filepath.Join(home, ".local", "share", "7DaysToDie"), 0o755)
+	if got := nativeUserData(env); got != filepath.Join(home, ".local", "share", "7DaysToDie") {
+		t.Errorf("game that ignores XDG_DATA_HOME: %s", got)
 	}
 }
 
