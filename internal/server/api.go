@@ -33,7 +33,7 @@ type gameView struct {
 func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 	env := s.env()
 	var list []gameView
-	for _, g := range games.All() {
+	for _, g := range games.Detect(env) {
 		v := gameView{ID: g.ID(), Name: g.Name(), AppID: g.AppID(), Location: g.Locate(env)}
 		if env.Steam != nil && g.AppID() > 0 {
 			v.HasCover = env.Steam.Cover(g.AppID()) != ""
@@ -87,6 +87,18 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true})
 }
 
+// specialGame reports whether a game is one of those with their own
+// handler. Only they can be pointed to a folder by hand; all others are
+// found through Steam.
+func specialGame(id string) bool {
+	for _, g := range games.All() {
+		if g.ID() == id {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) handleGamePath(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Game  string `json:"game"`
@@ -95,7 +107,7 @@ func (s *Server) handleGamePath(w http.ResponseWriter, r *http.Request) {
 		Reset bool   `json:"reset"`
 		Title string `json:"title"`
 	}
-	if err := decode(r, &req); err != nil || games.ByID(req.Game) == nil {
+	if err := decode(r, &req); err != nil || !specialGame(req.Game) {
 		fail(w, http.StatusBadRequest, "failed", err)
 		return
 	}
@@ -352,6 +364,9 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, f := range results[i].found {
 			status, iv, notes := g.Status(loc, inst, f, m)
+			if status == games.StatusHidden {
+				continue // not a mod for this game
+			}
 			notes = append(append([]games.Note{}, f.Notes...), notes...)
 			sel := status == games.StatusNew || status == games.StatusUpdate || status == games.StatusOlder
 			// Mods that would not work (wrong Minecraft version, missing
@@ -363,7 +378,7 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 			v.Mods = append(v.Mods, modView{
 				Key: f.Key, Name: f.Name, ModID: f.ModID, Version: f.Version, Kind: f.Kind, Status: status,
 				InstalledVersion: iv, Notes: notes, Selectable: sel,
-				Checked: (status == games.StatusNew || status == games.StatusUpdate) && !blocked,
+				Checked: (status == games.StatusNew || status == games.StatusUpdate) && !blocked && !f.Unsure,
 				Loader:  f.Loader, MCVersion: f.MCVersion, MCLabel: games.DescribeMC(f.MCVersion), HasCode: f.HasCode,
 			})
 		}
@@ -493,7 +508,7 @@ func (s *Server) handleInstall(w http.ResponseWriter, r *http.Request) {
 			fail(w, http.StatusBadRequest, "failed", fmt.Errorf("source not allowed: %s", it.Path))
 			return
 		}
-		f, err := s.installOne(tx, g, loc, inst, m, it.Path, it.Key)
+		f, plan, err := s.installOne(tx, g, loc, inst, m, it.Path, it.Key)
 		if err != nil {
 			tx.Rollback()
 			name := f.Name
@@ -502,6 +517,15 @@ func (s *Server) handleInstall(w http.ResponseWriter, r *http.Request) {
 			}
 			fail(w, http.StatusInternalServerError, errorCode(err), err, "mod", name)
 			return
+		}
+		if t, ok := g.(interface {
+			Track(*install.Tx, games.Found, install.Plan) error
+		}); ok {
+			if err := t.Track(tx, f, plan); err != nil {
+				tx.Rollback()
+				fail(w, http.StatusInternalServerError, errorCode(err), err, "mod", f.Name)
+				return
+			}
 		}
 		status, _, _ := g.Status(loc, inst, f, m)
 		results = append(results, installResult{Source: it.Path, File: filepath.Base(it.Path), Name: f.Name, Version: f.Version, Status: status, Kind: f.Kind})
@@ -535,15 +559,16 @@ func (s *Server) handleInstall(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) installOne(tx *install.Tx, g games.Game, loc games.Location, inst []games.Installed, m *install.Manager, p, key string) (games.Found, error) {
+func (s *Server) installOne(tx *install.Tx, g games.Game, loc games.Location, inst []games.Installed, m *install.Manager, p, key string) (games.Found, install.Plan, error) {
+	var plan install.Plan
 	src, err := archive.Open(p)
 	if err != nil {
-		return games.Found{}, err
+		return games.Found{}, plan, err
 	}
 	defer src.Close()
 	entries, err := src.Entries()
 	if err != nil {
-		return games.Found{}, err
+		return games.Found{}, plan, err
 	}
 	var f games.Found
 	found := false
@@ -554,16 +579,15 @@ func (s *Server) installOne(tx *install.Tx, g games.Game, loc games.Location, in
 		}
 	}
 	if !found {
-		return games.Found{}, fmt.Errorf("mod %q not found in %s", key, p)
+		return games.Found{}, plan, fmt.Errorf("mod %q not found in %s", key, p)
 	}
 	if f.Unsupported != "" {
-		return f, fmt.Errorf("unsupported mod: %s", f.Unsupported)
+		return f, plan, fmt.Errorf("unsupported mod: %s", f.Unsupported)
 	}
-	plan, err := g.Plan(loc, inst, f)
-	if err != nil {
-		return f, err
+	if plan, err = g.Plan(loc, inst, f); err != nil {
+		return f, plan, err
 	}
-	return f, tx.Apply(src, plan)
+	return f, plan, tx.Apply(src, plan)
 }
 
 // ---------- installed mods ----------

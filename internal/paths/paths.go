@@ -111,3 +111,15 @@ func xdgDownloads() string {
 	}
 	return ""
 }
+
+// DocumentsDir returns the user's documents folder, where some games keep
+// their mods. On Windows it follows a folder moved by OneDrive.
+func DocumentsDir() string {
+	if d := os.Getenv("ANYINSTALL_DOCUMENTS"); d != "" {
+		return d
+	}
+	if d := documentsDirOS(); d != "" {
+		return d
+	}
+	return filepath.Join(Home(), "Documents")
+}

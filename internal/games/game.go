@@ -51,8 +51,11 @@ type Found struct {
 	Deps        []string `json:"deps,omitempty"`
 	Unsupported string   `json:"unsupported,omitempty"` // reason code
 	Notes       []Note   `json:"notes,omitempty"`       // hints that only depend on the download
-	Folder      string   `json:"-"`                     // suggested folder or file name
-	Parts       []string `json:"-"`                     // game specific details for planning
+	// Unsure means the download may as well be for another game, so it is
+	// offered but not ticked.
+	Unsure bool     `json:"unsure,omitempty"`
+	Folder string   `json:"-"` // suggested folder or file name
+	Parts  []string `json:"-"` // game specific details for planning
 }
 
 // Installed is a mod that is already in the game.
@@ -80,7 +83,17 @@ type Location struct {
 	ModsDir string `json:"modsDir"`          // the folder shown to the user
 	Via     string `json:"via"`              // "steam", "custom" or "default"
 	Proton  bool   `json:"proton,omitempty"` // Linux: the Windows version of the game runs through Proton
+	System  string `json:"system,omitempty"` // mod system of a generic game (SysBepInEx ...)
 	Notes   []Note `json:"notes,omitempty"`
+	// Refused is set for games whose mods need a real mod manager. It
+	// says why; Found is false then.
+	Refused string `json:"refused,omitempty"`
+	// Prefix is the Proton prefix when the mods folder lies inside one.
+	// Nothing is written there before Proton has set it up.
+	Prefix string `json:"-"`
+	// WaitStart: the game has to be started once before mods can go in,
+	// because it creates the mods folder itself.
+	WaitStart bool `json:"-"`
 	// Backup is where backups are kept. It should be on the same drive as
 	// the mods so that moving is instant.
 	Backup string `json:"-"`
@@ -131,11 +144,17 @@ func All() []Game {
 	return []Game{&SevenDays{}, &EldenRing{}, &Minecraft{}}
 }
 
-// ByID finds a game.
+// ByID finds a game: one of All, or "steam-<app id>" for any other Steam
+// game.
 func ByID(id string) Game {
 	for _, g := range All() {
 		if g.ID() == id {
 			return g
+		}
+	}
+	if n, ok := strings.CutPrefix(id, genericPrefix); ok {
+		if appID, err := strconv.Atoi(n); err == nil && appID > 0 && !specialAppIDs[appID] && strconv.Itoa(appID) == n {
+			return NewGeneric(appID)
 		}
 	}
 	return nil

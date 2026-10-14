@@ -1,5 +1,6 @@
-// Package demo builds a pretend computer with Steam, the three supported
-// games, a Minecraft folder and a download folder full of example mods.
+// Package demo builds a pretend computer with Steam, the games with their
+// own handler and a few others, a Minecraft folder and a download folder
+// full of example mods.
 // "AnyInstall --demo" uses it, so the program can be tried (and tested)
 // without owning the games. Nothing outside the demo folder is touched.
 package demo
@@ -20,7 +21,9 @@ func Build(root string) (map[string]string, error) {
 	lib2 := filepath.Join(root, "SteamLibrary")
 	userData := filepath.Join(root, "AppData", "7DaysToDie")
 	mc := filepath.Join(root, "AppData", ".minecraft")
+	docs := filepath.Join(root, "Documents")
 	dl := filepath.Join(root, "Downloads")
+	common := filepath.Join(steam, "steamapps", "common")
 	data := filepath.Join(root, "AnyInstall-Daten")
 
 	vdf := fmt.Sprintf(`"libraryfolders"
@@ -55,6 +58,33 @@ func Build(root string) (map[string]string, error) {
 		filepath.Join(userData, "Mods", "SchnelleWerkbank", "ModInfo.xml"):                 modInfo("SchnelleWerkbank", "Schnellere Werkbank", "2.1"),
 		filepath.Join(userData, "Mods", "Taschenlampe", "Taschenlampe", "ModInfo.xml"):     modInfo("Taschenlampe", "Bessere Taschenlampe", "1.0"),
 		filepath.Join(userData, "Mods", "Taschenlampe", "Taschenlampe", "Config", "x.xml"): "<configs/>",
+
+		// Games Any Install recognises without knowing them in detail:
+		// Valheim with BepInEx, Stardew Valley with SMAPI, an Unreal
+		// Engine game, Euro Truck Simulator 2, and Skyrim, whose mods need
+		// a real mod manager. A game without mods is not listed.
+		filepath.Join(steam, "steamapps", "appmanifest_892970.acf"):                                             manifest(892970, "Valheim", "Valheim"),
+		filepath.Join(common, "Valheim", "valheim.exe"):                                                         "",
+		filepath.Join(common, "Valheim", "valheim_Data", "Managed", "Assembly-CSharp.dll"):                      "",
+		filepath.Join(common, "Valheim", "winhttp.dll"):                                                         "",
+		filepath.Join(common, "Valheim", "BepInEx", "core", "BepInEx.dll"):                                      "",
+		filepath.Join(common, "Valheim", "BepInEx", "plugins", "BetterUI", "BetterUI.dll"):                      "",
+		filepath.Join(steam, "steamapps", "appmanifest_413150.acf"):                                             manifest(413150, "Stardew Valley", "Stardew Valley"),
+		filepath.Join(common, "Stardew Valley", "Stardew Valley.exe"):                                           "",
+		filepath.Join(common, "Stardew Valley", "StardewModdingAPI.dll"):                                        "",
+		filepath.Join(common, "Stardew Valley", "Mods", "ConsoleCommands", "manifest.json"):                     `{"Name":"Console Commands","UniqueID":"SMAPI.ConsoleCommands","Version":"4.3.2","EntryDll":"ConsoleCommands.dll"}`,
+		filepath.Join(steam, "steamapps", "appmanifest_990080.acf"):                                             manifest(990080, "Hogwarts Legacy", "Hogwarts Legacy"),
+		filepath.Join(common, "Hogwarts Legacy", "HogwartsLegacy.exe"):                                          "",
+		filepath.Join(common, "Hogwarts Legacy", "Phoenix", "Content", "Paks", "pakchunk0-WindowsNoEditor.pak"): "",
+		filepath.Join(common, "Hogwarts Legacy", "Phoenix", "Binaries", "Win64", "HogwartsLegacy.exe"):          "",
+		filepath.Join(steam, "steamapps", "appmanifest_227300.acf"):                                             manifest(227300, "Euro Truck Simulator 2", "Euro Truck Simulator 2"),
+		filepath.Join(common, "Euro Truck Simulator 2", "bin", "win_x64", "eurotrucks2.exe"):                    "",
+		filepath.Join(docs, "Euro Truck Simulator 2", "mod", "my_truck_skin.scs"):                               "",
+		filepath.Join(steam, "steamapps", "appmanifest_489830.acf"):                                             manifest(489830, "The Elder Scrolls V: Skyrim Special Edition", "Skyrim Special Edition"),
+		filepath.Join(common, "Skyrim Special Edition", "SkyrimSE.exe"):                                         "",
+		filepath.Join(common, "Skyrim Special Edition", "Data", "Skyrim.esm"):                                   "",
+		filepath.Join(steam, "steamapps", "appmanifest_620.acf"):                                                manifest(620, "Portal 2", "Portal 2"),
+		filepath.Join(common, "Portal 2", "portal2.exe"):                                                        "",
 
 		// Minecraft with Fabric for 1.21.1 and two mods.
 		filepath.Join(mc, "versions", "1.21.1", "1.21.1.json"):                                           `{"id":"1.21.1"}`,
@@ -119,6 +149,18 @@ func Build(root string) (map[string]string, error) {
 		{"Faithful 32x.zip", map[string]string{
 			"pack.mcmeta": `{"pack":{"pack_format":34,"description":"Faithful"}}`, "assets/minecraft/textures/block/stone.png": "png",
 		}, 3 * time.Hour},
+		{"Azumatt-ValheimPlus-0.9.9.zip", map[string]string{
+			"manifest.json": `{"name":"ValheimPlus","version_number":"0.9.9","website_url":"","description":"Demo","dependencies":["denikson-BepInExPack_Valheim-5.4.2202"]}`,
+			"icon.png":      "png", "README.md": "# Valheim Plus", "plugins/ValheimPlus.dll": "MZ BepInEx.BaseUnityPlugin",
+		}, 25 * time.Minute},
+		{"Lookup Anything 1.40.0.zip", map[string]string{
+			"LookupAnything/manifest.json":      `{"Name":"Lookup Anything","Author":"Pathoschild","Version":"1.40.0","UniqueID":"Pathoschild.LookupAnything","EntryDll":"LookupAnything.dll"}`,
+			"LookupAnything/LookupAnything.dll": "MZ",
+		}, 40 * time.Minute},
+		{"Better Lumos-1234-1-2-1760000000.zip", map[string]string{
+			"BetterLumos/BetterLumos_P.pak": "pak", "BetterLumos/BetterLumos_P.utoc": "utoc", "BetterLumos/BetterLumos_P.ucas": "ucas",
+		}, 3 * time.Hour},
+		{"Realistic Rain 4.2.zip", map[string]string{"realistic_rain_4.scs": "scs", "readme.txt": "Demo"}, 6 * time.Hour},
 		{"Urlaubsfotos_2025.zip", map[string]string{"IMG_0001.jpg": "jpg", "IMG_0002.jpg": "jpg"}, 11 * 24 * time.Hour},
 		{"Grafiktreiber_Setup.zip", map[string]string{"setup.exe": "MZ"}, 40 * 24 * time.Hour},
 	}
@@ -145,6 +187,7 @@ func Build(root string) (map[string]string, error) {
 		"ANYINSTALL_7DTD_USERDATA": userData,
 		"ANYINSTALL_MINECRAFT":     mc,
 		"ANYINSTALL_DOWNLOADS":     dl,
+		"ANYINSTALL_DOCUMENTS":     docs,
 		"ANYINSTALL_DATA":          data,
 		"ANYINSTALL_DEMO":          root,
 	}, nil
