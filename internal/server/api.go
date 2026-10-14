@@ -500,7 +500,6 @@ func (s *Server) handleInstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var done []games.Found
-	var plans []install.Plan
 	var results []installResult
 	var installedPaths []string
 	for _, it := range req.Items {
@@ -519,10 +518,18 @@ func (s *Server) handleInstall(w http.ResponseWriter, r *http.Request) {
 			fail(w, http.StatusInternalServerError, errorCode(err), err, "mod", name)
 			return
 		}
+		if t, ok := g.(interface {
+			Track(*install.Tx, games.Found, install.Plan) error
+		}); ok {
+			if err := t.Track(tx, f, plan); err != nil {
+				tx.Rollback()
+				fail(w, http.StatusInternalServerError, errorCode(err), err, "mod", f.Name)
+				return
+			}
+		}
 		status, _, _ := g.Status(loc, inst, f, m)
 		results = append(results, installResult{Source: it.Path, File: filepath.Base(it.Path), Name: f.Name, Version: f.Version, Status: status, Kind: f.Kind})
 		done = append(done, f)
-		plans = append(plans, plan)
 		installedPaths = append(installedPaths, it.Path)
 		inst = g.Installed(loc, m)
 	}
@@ -534,14 +541,9 @@ func (s *Server) handleInstall(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusInternalServerError, errorCode(err), err)
 		return
 	}
-	for i, f := range done {
+	for _, f := range done {
 		if f.Version != "" {
 			_ = m.SetVersion(f.ModID, f.Version)
-		}
-		if t, ok := g.(interface {
-			Track(*install.Manager, games.Found, install.Plan) error
-		}); ok {
-			_ = t.Track(m, f, plans[i])
 		}
 	}
 	// Imported copies are not needed anymore.

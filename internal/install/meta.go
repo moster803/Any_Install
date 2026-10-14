@@ -60,32 +60,36 @@ func (m *Manager) Tracked() []TrackedMod {
 	return out
 }
 
-// Track remembers the files of a mod, replacing an earlier entry with the
-// same id. An update keeps files it no longer has in the list, so they
-// are still removed with the mod.
-func (m *Manager) Track(mod TrackedMod) error {
-	list := m.Tracked()
-	replaced := false
-	for i := range list {
-		if strings.EqualFold(list[i].ID, mod.ID) {
-			seen := map[string]bool{}
-			for _, f := range mod.Files {
-				seen[f] = true
+// Track records the files of a mod as part of the transaction, so that
+// undoing the install also brings back the old list. The mod's earlier
+// list is replaced (the plan removed files it no longer has), and files
+// it now owns are taken away from other mods, so switching those off
+// cannot move them.
+func (tx *Tx) Track(mod TrackedMod) error {
+	mine := map[string]bool{}
+	for _, f := range mod.Files {
+		mine[f] = true
+	}
+	var list []TrackedMod
+	for _, t := range tx.m.Tracked() {
+		if strings.EqualFold(t.ID, mod.ID) {
+			continue
+		}
+		var keep []string
+		for _, f := range t.Files {
+			if !mine[f] {
+				keep = append(keep, f)
 			}
-			for _, f := range list[i].Files {
-				if !seen[f] {
-					mod.Files = append(mod.Files, f)
-				}
-			}
-			list[i], replaced = mod, true
+		}
+		if len(keep) > 0 {
+			t.Files = keep
+			list = append(list, t)
 		}
 	}
-	if !replaced {
-		list = append(list, mod)
-	}
-	if err := os.MkdirAll(m.Root, 0o755); err != nil {
+	list = append(list, mod)
+	b, err := json.MarshalIndent(list, "", "  ")
+	if err != nil {
 		return err
 	}
-	b, _ := json.MarshalIndent(list, "", "  ")
-	return os.WriteFile(m.trackPath(), b, 0o644)
+	return tx.WriteFile(tx.m.trackPath(), b)
 }

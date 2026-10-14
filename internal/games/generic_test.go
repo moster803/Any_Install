@@ -170,7 +170,7 @@ func installGeneric(t *testing.T, g *Generic, loc Location, name string, files m
 		if err := tx.Apply(src, plan); err != nil {
 			t.Fatalf("%s: apply: %v", name, err)
 		}
-		if err := g.Track(m, f, plan); err != nil {
+		if err := g.Track(tx, f, plan); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -489,5 +489,110 @@ func TestDownloadName(t *testing.T) {
 		if n+"|"+v != want {
 			t.Errorf("%s: %s|%s, want %s", in, n, v, want)
 		}
+	}
+}
+
+func TestUpdatesLeaveNoOldFiles(t *testing.T) {
+	env, dir := steamWorld(t, 4010, "Pak Game", "P.exe", "P/Content/Paks/P.pak")
+	g := NewGeneric(4010)
+	loc := g.Locate(env)
+	installGeneric(t, g, loc, "Sky.zip", map[string]string{"Sky/Sky_P.pak": "", "Sky/Sky_old_P.pak": ""})
+	installGeneric(t, g, loc, "Sky.zip", map[string]string{"Sky/Sky_P.pak": "v2"})
+	if _, err := os.Stat(filepath.Join(dir, "P", "Content", "Paks", "~mods", "Sky", "Sky_old_P.pak")); err == nil {
+		t.Error("the old version's pak is still there")
+	}
+	exist(t, dir, "P/Content/Paks/~mods/Sky/Sky_P.pak")
+
+	// Cyberpunk: the new version drops a file, a second mod takes over
+	// another one, and undo brings back the old list.
+	env, dir = steamWorld(t, 1091500, "Cyberpunk 2077", "bin/x64/Cyberpunk2077.exe")
+	g = NewGeneric(1091500)
+	loc = g.Locate(env)
+	m := Manager(loc)
+	installGeneric(t, g, loc, "Cars.zip", map[string]string{"r6/scripts/a.reds": "", "r6/scripts/b.reds": "", "archive/pc/mod/shared.archive": "1"})
+	installGeneric(t, g, loc, "Cars.zip", map[string]string{"r6/scripts/a.reds": "v2", "archive/pc/mod/shared.archive": "1"})
+	if _, err := os.Stat(filepath.Join(dir, "r6", "scripts", "b.reds")); err == nil {
+		t.Error("the dropped file is still there")
+	}
+	installGeneric(t, g, loc, "Other.zip", map[string]string{"archive/pc/mod/shared.archive": "2"})
+	var cars Installed
+	for _, it := range g.Installed(loc, m) {
+		if it.Name == "Cars" {
+			cars = it
+		}
+	}
+	if len(cars.Paths) != 1 {
+		t.Fatalf("cars = %+v", cars)
+	}
+	// Switching Cars off must not take Other's file away.
+	if err := g.SetEnabled(loc, cars, false); err != nil {
+		t.Fatal(err)
+	}
+	exist(t, dir, "archive/pc/mod/shared.archive")
+	if _, err := m.UndoLast(); err != nil { // Other's install
+		t.Fatal(err)
+	}
+	for _, tm := range m.Tracked() {
+		if tm.Name == "Other" {
+			t.Error("undo kept the tracking of the undone install")
+		}
+	}
+}
+
+func TestBannerlordKeepsOfficialModules(t *testing.T) {
+	env, dir := steamWorld(t, 261550, "Mount & Blade II Bannerlord", "bin/Win64_Shipping_Client/Bannerlord.exe",
+		"Modules/Native/SubModule.xml")
+	os.WriteFile(filepath.Join(dir, "Modules", "Native", "SubModule.xml"), []byte(`<Module><Id value="Native"/><Name value="Native"/><Official value="true"/></Module>`), 0o644)
+	g := NewGeneric(261550)
+	loc := g.Locate(env)
+	m := Manager(loc)
+	f := analyze(t, g, "Native Fix.zip", map[string]string{"Native/SubModule.xml": `<Module><Id value="Native"/><Name value="Native fix"/></Module>`})[0]
+	inst := g.Installed(loc, m)
+	if st, _, _ := g.Status(loc, inst, f, m); st != StatusUnsupported {
+		t.Errorf("status = %s", st)
+	}
+	if _, err := g.Plan(loc, inst, f); err == nil {
+		t.Error("an official module would be replaced")
+	}
+}
+
+func TestRefusedFormatsAndLayouts(t *testing.T) {
+	g := NewGeneric(4000)
+	for name, files := range map[string]map[string]string{
+		"SkyUI.zip":    {"SkyUI_SE.esp": "", "Interface/x.swf": ""},
+		"Fomod.zip":    {"fomod/ModuleConfig.xml": "", "Data/a.txt": ""},
+		"BG3Mod.zip":   {"MyMod.pak": "", "info.json": "{}"},
+		"TrayOnly.zip": {"house.trayitem": ""},
+		"REDmod.zip":   {"mods/Cars/info.json": "{}", "mods/Cars/archives/x.archive": ""},
+	} {
+		if f := analyze(t, g, name, files); len(f) != 0 {
+			t.Errorf("%s offered for another game: %+v", name, f)
+		}
+	}
+	// An Unreal game without a project folder.
+	dir := t.TempDir()
+	touch(t, dir, "Game.exe", "Content/Paks/Game.pak")
+	if l := inspect(dir); l.system != SysUnreal || l.modsDir != filepath.Join(dir, "Content", "Paks", "~mods") {
+		t.Errorf("root unreal: %+v", l)
+	}
+	// The Windows version with its program in a sub-folder.
+	dir = t.TempDir()
+	touch(t, dir, "bin/win_x64/eurotrucks2.exe", "base.scs")
+	if l := inspect(dir); !l.windows || len(l.exes) != 1 {
+		t.Errorf("nested exe: %+v", l)
+	}
+}
+
+func TestThunderstoreMetadataStaysOut(t *testing.T) {
+	env, dir := steamWorld(t, 4011, "Unity Game", "G.exe", "BepInEx/core/BepInEx.dll")
+	g := NewGeneric(4011)
+	loc := g.Locate(env)
+	installGeneric(t, g, loc, "A-Mod-1.0.0.zip", map[string]string{
+		"manifest.json": `{"name":"Mod","version_number":"1.0.0"}`, "icon.png": "", "README.md": "",
+		"plugins/Mod.dll": "MZ", "config/mod.cfg": "", "assets/x.bundle": "",
+	})
+	exist(t, dir, "BepInEx/plugins/Mod/Mod.dll", "BepInEx/plugins/Mod/assets/x.bundle", "BepInEx/config/mod.cfg")
+	if _, err := os.Stat(filepath.Join(dir, "BepInEx", "plugins", "Mod", "manifest.json")); err == nil {
+		t.Error("package metadata installed")
 	}
 }

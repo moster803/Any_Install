@@ -314,6 +314,19 @@ func (tx *Tx) apply(src archive.Source, op Op) error {
 	return fmt.Errorf("unknown operation %q", op.Kind)
 }
 
+// WriteFile writes data to dst as part of the transaction: undo brings
+// back what was there before.
+func (tx *Tx) WriteFile(dst string, data []byte) error {
+	staged, err := tx.stage()
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(staged, data, 0o644); err != nil {
+		return err
+	}
+	return tx.place(staged, dst)
+}
+
 // Commit finishes the transaction and keeps its backup for undo.
 func (tx *Tx) Commit(mods []string) error {
 	os.RemoveAll(tx.staging)

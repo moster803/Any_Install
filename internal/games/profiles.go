@@ -289,6 +289,9 @@ func markerProfile(appID int, name, system, sub string, mk marker) *profile {
 		}
 		for _, it := range inst {
 			if it.ModID == f.ModID {
+				if it.Builtin {
+					return StatusUnsupported, "", []Note{note("warn", "official_module")}
+				}
 				if !it.Enabled {
 					notes = append(notes, note("info", "installed_disabled"))
 				}
@@ -300,7 +303,10 @@ func markerProfile(appID int, name, system, sub string, mk marker) *profile {
 	p.plan = func(loc Location, inst []Installed, f Found) (install.Plan, error) {
 		dst := filepath.Join(loc.ModsDir, f.Folder)
 		for _, it := range inst {
-			if it.ModID == f.ModID && !it.Builtin && len(it.Paths) == 1 {
+			if it.ModID == f.ModID && it.Builtin || len(it.Paths) == 1 && it.Builtin && strings.EqualFold(it.Paths[0], dst) {
+				return install.Plan{}, errUnsupported // the game's own modules stay as they are
+			}
+			if it.ModID == f.ModID && len(it.Paths) == 1 {
 				dst = it.Paths[0] // updated where it is, also when switched off
 			}
 		}
@@ -519,7 +525,8 @@ func simsProfile() *profile {
 	p := &profile{appID: 1222670, name: "The Sims 4", tip: "tip_sims"}
 	p.claim = func(src archive.Source, entries []archive.Entry) bool {
 		for _, e := range entries {
-			if !e.Dir && simsModExts[strings.ToLower(path.Ext(e.Name))] {
+			ext := strings.ToLower(path.Ext(e.Name))
+			if !e.Dir && (simsModExts[ext] || simsTrayExts[ext]) {
 				return true
 			}
 		}
@@ -537,7 +544,14 @@ func simsProfile() *profile {
 			loc.WaitStart = true
 			loc.Notes = append(loc.Notes, note("warn", "start_once", "game", g.Name()))
 		}
-		g.lists = []modList{{dir: loc.ModsDir, disabled: filepath.Join(root, "Mods_disabled"), files: []string{".package", ".ts4script"}}}
+		var tray []string
+		for ext := range simsTrayExts {
+			tray = append(tray, ext)
+		}
+		g.lists = []modList{
+			{dir: loc.ModsDir, disabled: filepath.Join(root, "Mods_disabled"), files: []string{".package", ".ts4script"}},
+			{dir: filepath.Join(root, "Tray"), disabled: filepath.Join(root, "Tray_disabled"), files: tray},
+		}
 		return loc
 	}
 	p.analyze = func(src archive.Source, entries []archive.Entry) []Found {
@@ -699,11 +713,21 @@ func cyberpunkProfile() *profile {
 		return []Found{f}
 	}
 	p.claim = func(src archive.Source, entries []archive.Entry) bool {
+		dirs := map[string]bool{}
 		for _, e := range entries {
-			l := strings.ToLower(e.Name)
-			if strings.Contains(l, "archive/pc/mod/") || strings.HasPrefix(l, "r6/") || strings.Contains(l, "/r6/") ||
-				strings.HasPrefix(l, "red4ext/") || strings.Contains(l, "/red4ext/") || path.Ext(l) == ".archive" {
+			if e.Dir {
+				dirs[strings.ToLower(e.Name)] = true
+			}
+		}
+		for _, e := range entries {
+			l := "/" + strings.ToLower(e.Name)
+			switch {
+			case strings.Contains(l, "/archive/pc/mod/"), strings.Contains(l, "/r6/"), strings.Contains(l, "/red4ext/"),
+				strings.Contains(l, "/bin/x64/plugins/cyber_engine_tweaks"), strings.Contains(l, "/engine/config/platform/pc/"),
+				path.Ext(l) == ".archive":
 				return true
+			case path.Base(l) == "info.json" && dirs[strings.TrimPrefix(path.Join(path.Dir(l), "archives"), "/")]:
+				return true // a REDmod mod
 			}
 		}
 		return false
@@ -749,7 +773,24 @@ func cyberpunkProfile() *profile {
 			}
 			ops = append(ops, install.Op{Kind: install.PutFile, Src: file, Dst: filepath.Join(loc.GameDir, filepath.FromSlash(rel))})
 		}
-		return install.Plan{Ops: ops}, nil
+		// An update removes what the old version had and the new one has
+		// not, and the copies kept while it was switched off.
+		keep := map[string]bool{}
+		for _, op := range ops {
+			keep[op.Dst] = true
+		}
+		var old []install.Op
+		for _, it := range inst {
+			if it.ID != "t:"+f.ModID {
+				continue
+			}
+			for _, p := range it.Paths {
+				if !keep[p] {
+					old = append(old, install.Op{Kind: install.Remove, Dst: p})
+				}
+			}
+		}
+		return install.Plan{Ops: append(old, ops...)}, nil
 	}
 	return p
 }

@@ -294,12 +294,23 @@ func (g *Generic) SetEnabled(loc Location, it Installed, on bool) error {
 	if on {
 		to = g.lists[i].dir
 	}
+	var moves [][2]string
 	for _, p := range it.Paths {
-		target := filepath.Join(to, filepath.Base(p))
-		if target == p {
-			continue
+		if target := filepath.Join(to, filepath.Base(p)); target != p {
+			moves = append(moves, [2]string{p, target})
 		}
-		if err := install.Move(p, target); err != nil {
+	}
+	return moveAll(moves)
+}
+
+// moveAll moves all files of a mod, or none: when one move fails, the
+// ones done so far are moved back, so a mod is never half switched off.
+func moveAll(moves [][2]string) error {
+	for i, mv := range moves {
+		if err := install.Move(mv[0], mv[1]); err != nil {
+			for j := i - 1; j >= 0; j-- {
+				_ = install.Move(moves[j][1], moves[j][0])
+			}
 			return err
 		}
 	}
@@ -380,27 +391,25 @@ func setTracked(loc Location, id string, on bool) error {
 		if !strings.EqualFold(t.ID, id) {
 			continue
 		}
+		var moves [][2]string
 		for _, f := range t.Files {
 			d := disabledPath(loc, t.ID, f)
 			from, to := f, d
 			if on {
 				from, to = d, f
 			}
-			if !exists(from) {
-				continue
-			}
-			if err := install.Move(from, to); err != nil {
-				return err
+			if exists(from) {
+				moves = append(moves, [2]string{from, to})
 			}
 		}
-		return nil
+		return moveAll(moves)
 	}
 	return errUnsupported
 }
 
 // Track remembers which files an install put where, for games whose mods
-// are spread over the game folder.
-func (g *Generic) Track(m *install.Manager, f Found, plan install.Plan) error {
+// are spread over the game folder. It is part of the install transaction.
+func (g *Generic) Track(tx *install.Tx, f Found, plan install.Plan) error {
 	if g.prof == nil || !g.prof.tracked {
 		return nil
 	}
@@ -410,5 +419,5 @@ func (g *Generic) Track(m *install.Manager, f Found, plan install.Plan) error {
 			files = append(files, op.Dst)
 		}
 	}
-	return m.Track(install.TrackedMod{ID: f.ModID, Name: f.Name, Version: f.Version, Files: files})
+	return tx.Track(install.TrackedMod{ID: f.ModID, Name: f.Name, Version: f.Version, Files: files})
 }

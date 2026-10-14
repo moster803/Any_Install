@@ -97,6 +97,9 @@ func inspect(dir string) layout {
 			l.exes = append(l.exes, name)
 		}
 	}
+	if l.project == "" && hasPak(filepath.Join(dir, "Content", "Paks")) {
+		l.project = dir // an Unreal game without a project folder
+	}
 	if l.project != "" {
 		// Unreal games start <Project>/Binaries/Win64/<Project>-Win64-Shipping.exe.
 		if bins, err := os.ReadDir(filepath.Join(l.project, "Binaries", "Win64")); err == nil {
@@ -112,6 +115,13 @@ func inspect(dir string) layout {
 			}
 		}
 		l.signed = hasSigned(filepath.Join(l.project, "Content", "Paks"))
+	}
+	if !l.windows {
+		// Many games keep their program in a sub-folder
+		// (bin/win_x64/eurotrucks2.exe, Game/Bin/TS4_x64.exe).
+		nested := nestedExes(dir)
+		l.exes = append(l.exes, nested...)
+		l.windows = len(nested) > 0
 	}
 	switch {
 	case l.system == SysBepInEx:
@@ -144,6 +154,34 @@ func hasAny(dir string, names ...string) bool {
 		}
 	}
 	return false
+}
+
+// nestedExes finds Windows programs up to three folders deep. The search
+// is bounded, as game folders can be huge.
+func nestedExes(dir string) []string {
+	var out []string
+	seen := 0
+	base := strings.Count(filepath.Clean(dir), string(filepath.Separator))
+	_ = filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if seen++; seen > 5000 {
+			return filepath.SkipAll
+		}
+		lower := strings.ToLower(d.Name())
+		if d.IsDir() {
+			if p != dir && (strings.Count(p, string(filepath.Separator))-base > 3 || strings.Contains(lower, "redist") || lower == "directx") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasSuffix(lower, ".exe") && !strings.Contains(lower, "unins") && !strings.Contains(lower, "crash") && !strings.Contains(lower, "setup") {
+			out = append(out, d.Name())
+		}
+		return nil
+	})
+	return out
 }
 
 // hasSigned reports whether the game's own paks come with .sig files. Such

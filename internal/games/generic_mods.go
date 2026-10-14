@@ -89,7 +89,7 @@ func analyzeGeneric(src archive.Source, entries []archive.Entry, self int) []Fou
 			files = append(files, e.Name)
 		}
 	}
-	if len(files) == 0 || claimed(src, entries, self) {
+	if len(files) == 0 || claimed(src, entries, self) || refusedFormat(files) {
 		return nil
 	}
 	modish := false
@@ -288,6 +288,28 @@ func claimed(src archive.Source, entries []archive.Entry, self int) bool {
 		return true
 	}
 	return profileClaim(src, entries, self) != 0
+}
+
+// refusedFormat recognises mods of games that need a real mod manager
+// (Bethesda plugins and archives, FOMOD installers, Larian mods), so they
+// are not offered for any other game.
+func refusedFormat(files []string) bool {
+	pak, info := false, false
+	for _, f := range files {
+		l := strings.ToLower(f)
+		switch path.Ext(l) {
+		case ".esp", ".esm", ".esl", ".bsa", ".ba2", ".lsx", ".lsf":
+			return true
+		case ".pak":
+			pak = true
+		}
+		if strings.HasSuffix(l, "fomod/moduleconfig.xml") {
+			return true
+		}
+		// Baldur's Gate 3 mods come as a .pak with an info.json.
+		info = info || path.Base(l) == "info.json"
+	}
+	return pak && info
 }
 
 type kid struct {
@@ -510,6 +532,11 @@ func genericPlan(loc Location, inst []Installed, f Found) (install.Plan, error) 
 		}
 	}
 	var ops []install.Op
+	// Files are put into the mod's folder one by one; the old version's
+	// folder goes first, so no file of it is left behind.
+	if isDir(dst) && (f.Parts[0] == typePak || f.Parts[0] == typeThunder || f.Parts[0] == typeDLL && loc.System == SysBepInEx) {
+		ops = append(ops, install.Op{Kind: install.Remove, Dst: dst})
+	}
 	switch f.Parts[0] {
 	case typeLoader:
 		for _, ref := range f.Parts[2:] {
@@ -543,11 +570,13 @@ func genericPlan(loc Location, inst []Installed, f Found) (install.Plan, error) 
 				ops = append(ops, install.Op{Kind: install.ReplaceDir, Src: join(f.Key, name), Dst: filepath.Join(game, "BepInEx", special[lower], f.Folder)})
 			case ref[0] == 'd' && lower == "core":
 				// The loader's own files come from the loader download.
+			case ref[0] == 'f' && (lower == "manifest.json" || lower == "icon.png" || lower == "readme.md" || lower == "changelog.md" || strings.HasPrefix(lower, "license")):
+				// Thunderstore's description of the package.
 			default:
 				rest = append(rest, ref)
 			}
 		}
-		if len(ops) == 0 {
+		if len(ops) == 0 || len(ops) == 1 && ops[0].Kind == install.Remove {
 			// A plain package: everything goes into its plugin folder.
 			ops = append(ops, install.Op{Kind: install.ReplaceDir, Src: f.Key, Dst: dst})
 			break
