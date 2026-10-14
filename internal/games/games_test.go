@@ -4,15 +4,19 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/moster803/Any_Install/internal/archive"
+	"github.com/moster803/Any_Install/internal/steam"
 )
 
 func zipBytes(files map[string]string) []byte {
@@ -320,5 +324,196 @@ func TestSevenDaysPackSkipsGameMods(t *testing.T) {
 	})
 	if len(f) != 2 || f[0].ModID != "0-SCore" || f[1].ModID != "BdubsVehicles" {
 		t.Errorf("pack mods = %+v, want 0-SCore and BdubsVehicles without the game's Harmony", f)
+	}
+	for _, m := range f {
+		if len(m.Notes) != 1 || m.Notes[0].Code != "game_copy" {
+			t.Errorf("%s: notes = %+v, want the game copy hint", m.ModID, m.Notes)
+		}
+	}
+	f = analyze(t, g, "Launcher-Copy.zip", map[string]string{
+		"7 Days To Die/7DaysToDie.exe":           "MZ",
+		"7 Days To Die/Mods/0-SCore/ModInfo.xml": mi("0-SCore"),
+	})
+	if len(f) != 1 || len(f[0].Notes) != 1 || f[0].Notes[0].Code != "game_copy" {
+		t.Errorf("game copy without TFP mods = %+v", f)
+	}
+	f = analyze(t, g, "Modpack.zip", map[string]string{
+		"Mods/0-SCore/ModInfo.xml":       mi("0-SCore"),
+		"Mods/BdubsVehicles/ModInfo.xml": mi("BdubsVehicles"),
+	})
+	if len(f) != 2 || f[0].Notes != nil || f[1].Notes != nil {
+		t.Errorf("a plain pack has no game copy hint: %+v", f)
+	}
+}
+
+// sevenDaysWorld builds a home folder with Steam and 7 Days to Die in the
+// given library ("" = the Steam folder itself).
+func sevenDaysWorld(t *testing.T, lib string) (home string, env *Env) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("Proton only exists on Linux")
+	}
+	home = t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_DATA_HOME", "")
+	t.Setenv("ANYINSTALL_7DTD_USERDATA", "")
+	root := filepath.Join(home, ".local", "share", "Steam")
+	libs := []string{root}
+	if lib != "" {
+		lib = filepath.Join(home, lib)
+		libs = append(libs, lib)
+	} else {
+		lib = root
+	}
+	os.MkdirAll(filepath.Join(root, "steamapps"), 0o755)
+	os.MkdirAll(filepath.Join(lib, "steamapps", "common", "7 Days To Die"), 0o755)
+	os.WriteFile(filepath.Join(lib, "steamapps", "common", "7 Days To Die", "7DaysToDie.x86_64"), nil, 0o755)
+	os.WriteFile(filepath.Join(lib, "steamapps", "appmanifest_251570.acf"),
+		[]byte(`"AppState" { "appid" "251570" "name" "7 Days to Die" "installdir" "7 Days To Die" }`), 0o644)
+	return home, &Env{Steam: &steam.Steam{Root: root, Libraries: libs}}
+}
+
+func setCompatTool(t *testing.T, env *Env, name string) {
+	t.Helper()
+	dir := filepath.Join(env.Steam.Root, "config")
+	os.MkdirAll(dir, 0o755)
+	vdf := `"InstallConfigStore" { "Software" { "Valve" { "Steam" { "CompatToolMapping" { "251570" { "name" "` + name + `" } } } } } }`
+	if err := os.WriteFile(filepath.Join(dir, "config.vdf"), []byte(vdf), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSevenDaysUserDataNativeAndProton(t *testing.T) {
+	home, env := sevenDaysWorld(t, "Games")
+	g := &SevenDays{}
+	native := filepath.Join(home, ".local", "share", "7DaysToDie")
+	pfx := filepath.Join(home, "Games", "steamapps", "compatdata", "251570", "pfx")
+	inPfx := filepath.Join(pfx, "drive_c", "users", "steamuser", "AppData", "Roaming", "7DaysToDie")
+	mod := Found{Key: "HUD", Kind: "mod", ModID: "HUD", Folder: "HUD"}
+
+	loc := g.Locate(env)
+	if !loc.Found || loc.ModsDir != filepath.Join(native, "Mods") || loc.Proton {
+		t.Fatalf("nothing set: %+v", loc)
+	}
+
+	// Proton forced in Steam, but the game has not been started with it.
+	setCompatTool(t, env, "proton_9")
+	loc = g.Locate(env)
+	if loc.ModsDir != filepath.Join(inPfx, "Mods") || !loc.Proton || len(loc.Notes) != 1 || loc.Notes[0].Code != "proton_no_prefix" {
+		t.Fatalf("proton without prefix: %+v", loc)
+	}
+	if _, err := g.Plan(loc, nil, mod); !errors.Is(err, ErrStartGameFirst) {
+		t.Errorf("install before the first start: err = %v", err)
+	}
+	// Opening the Mods folder creates it, but Proton has still not set
+	// up its prefix.
+	os.MkdirAll(filepath.Join(inPfx, "Mods"), 0o755)
+	if loc = g.Locate(env); len(loc.Notes) != 1 || Ready(loc) == nil {
+		t.Errorf("folders alone are not a Proton prefix: %+v", loc)
+	}
+	if _, err := g.Plan(loc, nil, mod); !errors.Is(err, ErrStartGameFirst) {
+		t.Errorf("install into folders without a prefix: err = %v", err)
+	}
+	os.WriteFile(filepath.Join(pfx, "system.reg"), nil, 0o644)
+	loc = g.Locate(env)
+	if loc.ModsDir != filepath.Join(inPfx, "Mods") || !loc.Proton || len(loc.Notes) != 0 {
+		t.Fatalf("proton: %+v", loc)
+	}
+	if p, err := g.Plan(loc, nil, mod); err != nil || p.Ops[0].Dst != filepath.Join(inPfx, "Mods", "HUD") {
+		t.Errorf("plan = %+v, %v", p, err)
+	}
+
+	// The Steam Linux Runtime runs the Linux version.
+	setCompatTool(t, env, "steamlinuxruntime_sniper")
+	if loc = g.Locate(env); loc.ModsDir != filepath.Join(native, "Mods") || loc.Proton {
+		t.Errorf("linux runtime: %+v", loc)
+	}
+
+	// Nothing set: the folder the game wrote to last wins.
+	os.Remove(filepath.Join(env.Steam.Root, "config", "config.vdf"))
+	if loc = g.Locate(env); loc.ModsDir != filepath.Join(inPfx, "Mods") {
+		t.Errorf("only the prefix was used: %+v", loc)
+	}
+	old, recent := time.Now().Add(-48*time.Hour), time.Now().Add(-time.Hour)
+	for _, d := range []string{filepath.Join(native, "logs"), filepath.Join(inPfx, "logs")} {
+		os.MkdirAll(d, 0o755)
+	}
+	os.Chtimes(filepath.Join(native, "logs"), recent, recent)
+	os.Chtimes(filepath.Join(inPfx, "logs"), old, old)
+	// Any Install's own folders do not count as the game being used.
+	os.MkdirAll(filepath.Join(inPfx, "Mods"), 0o755)
+	if loc = g.Locate(env); loc.ModsDir != filepath.Join(native, "Mods") || loc.Proton {
+		t.Errorf("linux version used last: %+v", loc)
+	}
+	// Playing only changes a file deep inside the saves.
+	save := filepath.Join(inPfx, "Saves", "Navezgane", "MyGame")
+	os.MkdirAll(save, 0o755)
+	os.WriteFile(filepath.Join(save, "main.ttw"), nil, 0o644)
+	for _, d := range []string{filepath.Join(inPfx, "Saves"), filepath.Join(inPfx, "Saves", "Navezgane"), save, filepath.Join(save, "main.ttw")} {
+		os.Chtimes(d, old, old)
+	}
+	if loc = g.Locate(env); loc.Proton {
+		t.Errorf("old saves in the prefix: %+v", loc)
+	}
+	os.Chtimes(filepath.Join(save, "main.ttw"), time.Now(), time.Now())
+	if loc = g.Locate(env); loc.ModsDir != filepath.Join(inPfx, "Mods") || !loc.Proton {
+		t.Errorf("proton used last: %+v", loc)
+	}
+}
+
+func TestSevenDaysProtonPrefixInGameLibrary(t *testing.T) {
+	home, env := sevenDaysWorld(t, "Games")
+	setCompatTool(t, env, "proton_9")
+	// A folder chosen by hand that is not inside a Steam library: the
+	// prefix is still the one in the library Steam runs the game from.
+	custom := filepath.Join(home, "Spiele", "7DTD")
+	os.MkdirAll(custom, 0o755)
+	os.WriteFile(filepath.Join(custom, "7DaysToDie.x86_64"), nil, 0o755)
+	env.Custom = map[string]string{"7dtd": custom}
+	loc := (&SevenDays{}).Locate(env)
+	want := filepath.Join(home, "Games", "steamapps", "compatdata", "251570", "pfx", "drive_c", "users", "steamuser", "AppData", "Roaming", "7DaysToDie", "Mods")
+	if loc.ModsDir != want {
+		t.Errorf("mods dir = %s, want %s", loc.ModsDir, want)
+	}
+}
+
+func TestSevenDaysNativeUserDataSandbox(t *testing.T) {
+	home, env := sevenDaysWorld(t, "")
+	sandbox := filepath.Join(home, ".var", "app", "com.valvesoftware.Steam")
+	env.Steam.Root = filepath.Join(sandbox, ".local", "share", "Steam")
+	if got, want := nativeUserData(env), filepath.Join(sandbox, ".local", "share", "7DaysToDie"); got != want {
+		t.Errorf("flatpak: %s, want %s", got, want)
+	}
+	env.Steam.Root = filepath.Join(home, ".local", "share", "Steam")
+	xdg := filepath.Join(home, "data")
+	t.Setenv("XDG_DATA_HOME", xdg)
+	if got := nativeUserData(env); got != filepath.Join(xdg, "7DaysToDie") {
+		t.Errorf("XDG_DATA_HOME before the first start: %s", got)
+	}
+	os.MkdirAll(filepath.Join(home, ".local", "share", "7DaysToDie"), 0o755)
+	if got := nativeUserData(env); got != filepath.Join(home, ".local", "share", "7DaysToDie") {
+		t.Errorf("game that ignores XDG_DATA_HOME: %s", got)
+	}
+}
+
+func TestSevenDaysLinuxTip(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("linux only")
+	}
+	g := &SevenDays{}
+	code := []Found{{Name: "SCore", HasCode: true}}
+	has := func(tips []Note) bool {
+		for _, n := range tips {
+			if n.Code == "tip_7dtd_linux_proton" {
+				return true
+			}
+		}
+		return false
+	}
+	if !has(g.Tips(Location{}, code)) {
+		t.Error("native Linux with a code mod should suggest Proton")
+	}
+	if has(g.Tips(Location{Proton: true}, code)) || has(g.Tips(Location{}, []Found{{Name: "HUD"}})) {
+		t.Error("no Proton hint with Proton or without code mods")
 	}
 }

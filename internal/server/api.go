@@ -352,6 +352,7 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, f := range results[i].found {
 			status, iv, notes := g.Status(loc, inst, f, m)
+			notes = append(append([]games.Note{}, f.Notes...), notes...)
 			sel := status == games.StatusNew || status == games.StatusUpdate || status == games.StatusOlder
 			// Mods that would not work (wrong Minecraft version, missing
 			// loader) are offered but not ticked.
@@ -468,6 +469,12 @@ func (s *Server) handleInstall(w http.ResponseWriter, r *http.Request) {
 	}
 	if sys.Running(g.Processes()) {
 		fail(w, http.StatusConflict, "game_running", nil, "game", g.Name())
+		return
+	}
+	// Checked before the backup folder is created, which may lie in the
+	// same not yet existing Proton prefix.
+	if err := games.Ready(loc); err != nil {
+		fail(w, http.StatusConflict, errorCode(err), err)
 		return
 	}
 	m := games.Manager(loc)
@@ -771,6 +778,10 @@ func (s *Server) handleOpen(w http.ResponseWriter, r *http.Request) {
 		switch req.What {
 		case "mods":
 			target = loc.ModsDir
+			if err := games.Ready(loc); err != nil {
+				fail(w, http.StatusConflict, errorCode(err), err)
+				return
+			}
 			_ = os.MkdirAll(target, 0o755)
 		case "game":
 			target = loc.GameDir

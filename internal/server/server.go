@@ -263,6 +263,8 @@ func errorCode(err error) string {
 		return "offline"
 	case errors.Is(err, games.ErrNoVersion):
 		return "no_version"
+	case errors.Is(err, games.ErrStartGameFirst):
+		return "start_game_first"
 	case errors.Is(err, fs.ErrPermission):
 		return "permission"
 	case errors.Is(err, fs.ErrExist):

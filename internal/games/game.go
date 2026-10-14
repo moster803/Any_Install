@@ -50,6 +50,7 @@ type Found struct {
 	MCVersion   string   `json:"mcVersion,omitempty"` // Minecraft version requirement as written by the mod
 	Deps        []string `json:"deps,omitempty"`
 	Unsupported string   `json:"unsupported,omitempty"` // reason code
+	Notes       []Note   `json:"notes,omitempty"`       // hints that only depend on the download
 	Folder      string   `json:"-"`                     // suggested folder or file name
 	Parts       []string `json:"-"`                     // game specific details for planning
 }
@@ -75,9 +76,10 @@ type Installed struct {
 // Location is where a game and its mods live on this computer.
 type Location struct {
 	Found   bool   `json:"found"`
-	Root    string `json:"root"`    // game folder (or .minecraft)
-	ModsDir string `json:"modsDir"` // the folder shown to the user
-	Via     string `json:"via"`     // "steam", "custom" or "default"
+	Root    string `json:"root"`             // game folder (or .minecraft)
+	ModsDir string `json:"modsDir"`          // the folder shown to the user
+	Via     string `json:"via"`              // "steam", "custom" or "default"
+	Proton  bool   `json:"proton,omitempty"` // Linux: the Windows version of the game runs through Proton
 	Notes   []Note `json:"notes,omitempty"`
 	// Backup is where backups are kept. It should be on the same drive as
 	// the mods so that moving is instant.

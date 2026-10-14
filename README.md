@@ -62,7 +62,7 @@ Download-Ordner voller Beispiel-Mods in einem Temp-Ordner. An echten Spielen wir
 
 | Spiel | Ziel |
 |---|---|
-| 7 Days to Die | `%APPDATA%\7DaysToDie\Mods` (Linux: `~/.local/share/7DaysToDie/Mods`). Das ist der Ordner, den das Spiel seit Version 1.0 bevorzugt. Mods im alten `Mods`-Ordner im Spielverzeichnis werden weiter erkannt und dort aktualisiert. |
+| 7 Days to Die | `%APPDATA%\7DaysToDie\Mods`. Das ist der Ordner, den das Spiel seit Version 1.0 bevorzugt. Mods im alten `Mods`-Ordner im Spielverzeichnis werden weiter erkannt und dort aktualisiert. Linux: `~/.local/share/7DaysToDie/Mods`. Ist in Steam Proton eingestellt, läuft die Windows-Version, und die Mods kommen in den Proton-Ordner `steamapps/compatdata/251570/pfx/drive_c/users/steamuser/AppData/Roaming/7DaysToDie/Mods`. Das erkennt Any Install selbst. |
 | Elden Ring | `ELDEN RING\Game` (Seamless Co-op, Mod Loader) und `ELDEN RING\Game\mods` (DLL-Mods) |
 | Minecraft Java | `%APPDATA%\.minecraft\mods`, `resourcepacks`, `shaderpacks` (Linux: `~/.minecraft`) |
 
@@ -82,6 +82,17 @@ Ein Spiel in einem ungewöhnlichen Ordner kann man in der Spielauswahl selbst w�
 
 Einstellungen und eine Protokolldatei (`anyinstall.log`, hilfreich bei Problemen) liegen
 im Ordner `AnyInstall-Daten` neben der Programmdatei.
+
+## Spiel stürzt mit Mods ab?
+
+- **Passt die Mod-Version zum Spiel?** Die Spielversion steht im Hauptmenü. Große Mods wie Overhauls
+  gibt es für jede Spielversion einzeln. Pakete mit kompletter Spielkopie für einen Mod-Launcher passen
+  nur zu der Spielversion, die im Paket steckt. Any Install weist darauf hin.
+- **7 Days to Die:** Mods mit eigenem Code laufen nur ohne EAC (Easy Anti-Cheat).
+- **7 Days to Die unter Linux:** Große Mods werden für die Windows-Version gemacht. Läuft das Spiel
+  nicht stabil, in Steam unter *Eigenschaften → Kompatibilität* Proton einstellen, das Spiel einmal
+  starten und die Mods mit Any Install neu installieren.
+- Einzelne Mods lassen sich unter „Meine Mods“ ausschalten. So findet man heraus, welcher Mod schuld ist.
 
 ## Zusammen spielen
 
